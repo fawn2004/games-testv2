@@ -50,6 +50,8 @@ final class HudView extends View {
     private long lookStartT;
     private boolean lookMoved, holdFired;
     private String toast;
+    private String shownPlace;
+    private long placeUntil;
     private long toastUntil;
 
     private final Runnable holdBreak = new Runnable() {
@@ -176,6 +178,24 @@ final class HudView extends View {
             text.setTextSize(16 * dp);
             c.drawText(toast, w / 2f, barY - 14 * dp, text);
         }
+
+        // Biome / village banner and loading message
+        String place = in.place;
+        if (place != null && !place.equals(shownPlace)) {
+            shownPlace = place;
+            placeUntil = now + 3500;
+        }
+        if (in.loading) {
+            text.setTextSize(18 * dp);
+            c.drawText("Loading world\u2026", w / 2f, h * 0.38f, text);
+        } else if (now < placeUntil && shownPlace != null && !shownPlace.isEmpty()) {
+            float fade = Math.min(1f, (placeUntil - now) / 600f);
+            text.setTextSize(22 * dp);
+            text.setAlpha((int) (255 * fade));
+            c.drawText(shownPlace, w / 2f, 44 * dp, text);
+            text.setAlpha(255);
+        }
+        postInvalidateDelayed(250);
 
         if (invOpen) drawInventory(c, w, h, now);
     }

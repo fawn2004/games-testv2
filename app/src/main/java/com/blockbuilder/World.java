@@ -1,52 +1,95 @@
 package com.blockbuilder;
 
-import java.util.Arrays;
-import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 
-/** Fixed-size voxel world split into 16x16 columns ("chunks") for meshing. */
+/**
+ * A near-infinite world made of 16x16 chunks that are generated (or loaded) around the
+ * player and dropped again far away. Coordinates are ints; the usable area is
+ * +-LIMIT blocks in x and z.
+ */
 final class World {
-    static final int SX = 128, SY = 64, SZ = 128;
-    static final int CS = 16, CX = SX / CS, CZ = SZ / CS;
+    static final int SY = 96, CS = 16;
     static final int SEA = 21;
     static final int FLAT_TOP = 10;
-
-    final char[] blocks = new char[SX * SY * SZ];
-    /** Orientation / open state of shaped blocks (see Shapes). */
-    final byte[] meta = new byte[SX * SY * SZ];
-    final boolean[] chunkDirty = new boolean[CX * CZ];
-    /** Highest y that has ever held a non-air block (shadow rays stop above it). */
-    int maxHeight = SY - 1;
+    /** Half-width of the usable world (an invisible wall stands there). */
+    static final int LIMIT = 10_000_000;
     /** Direction toward the sun, per block climbed (x and z drift per +1 y). */
     static final float SUN_DX = 0.9f, SUN_DZ = 0.45f; // late-afternoon sun: long, warm shadows
     /** Longest shadow, in blocks of height. */
     static final int SHADOW_STEPS = 32;
-    long seed;
 
-    static int idx(int x, int y, int z) {
-        return (x * SZ + z) * SY + y;
+    final ConcurrentHashMap<Long, Chunk> chunks = new ConcurrentHashMap<>();
+    final Generator gen;
+    final long seed;
+
+    /** One-entry cache for chunk lookups (an immutable pair, so it is safe across threads). */
+    private static final class Last {
+        final long key;
+        final Chunk chunk;
+
+        Last(long key, Chunk chunk) {
+            this.key = key;
+            this.chunk = chunk;
+        }
     }
 
-    /** Block at a position. Below the world is bedrock; outside it is air. */
+    private volatile Last last = new Last(Long.MIN_VALUE, null);
+
+    World(long seed, boolean flat) {
+        this.seed = seed;
+        this.gen = new Generator(seed, flat);
+    }
+
+    Chunk chunk(int cx, int cz) {
+        long k = Chunk.key(cx, cz);
+        Last l = last;
+        if (l.key == k && l.chunk != null) return l.chunk;
+        Chunk c = chunks.get(k);
+        if (c != null) last = new Last(k, c);
+        return c;
+    }
+
+    boolean isLoaded(int x, int z) {
+        return chunk(x >> 4, z >> 4) != null;
+    }
+
+    void addChunk(Chunk c) {
+        chunks.put(c.key(), c);
+        // Neighbours need new meshes now that their border (and shadows) are known.
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++) {
+                Chunk n = chunks.get(Chunk.key(c.cx + dx, c.cz + dz));
+                if (n != null) n.dirty.set(true);
+            }
+    }
+
+    void removeChunk(Chunk c) {
+        chunks.remove(c.key());
+        last = new Last(Long.MIN_VALUE, null);
+    }
+
+    /** Block at a position. Below the world is bedrock; above it and in unloaded chunks, air. */
     int get(int x, int y, int z) {
         if (y < 0) return Blocks.BEDROCK;
-        if (y >= SY || x < 0 || z < 0 || x >= SX || z >= SZ) return Blocks.AIR;
-        return blocks[idx(x, y, z)];
-    }
-
-    /** Collision query: the world edges act as invisible walls. */
-    boolean solidAt(int x, int y, int z) {
-        if (x < 0 || z < 0 || x >= SX || z >= SZ || y < 0) return true;
-        if (y >= SY) return false;
-        return Blocks.isSolid(blocks[idx(x, y, z)]);
-    }
-
-    static boolean inside(int x, int y, int z) {
-        return x >= 0 && y >= 0 && z >= 0 && x < SX && y < SY && z < SZ;
+        if (y >= SY) return Blocks.AIR;
+        Chunk c = chunk(x >> 4, z >> 4);
+        if (c == null) return Blocks.AIR;
+        return c.blocks[Chunk.idx(x & 15, y, z & 15)];
     }
 
     int getMeta(int x, int y, int z) {
-        if (!inside(x, y, z)) return 0;
-        return meta[idx(x, y, z)];
+        if (y < 0 || y >= SY) return 0;
+        Chunk c = chunk(x >> 4, z >> 4);
+        if (c == null) return 0;
+        return c.meta[Chunk.idx(x & 15, y, z & 15)];
+    }
+
+    static boolean insideY(int y) {
+        return y >= 0 && y < SY;
+    }
+
+    static boolean insideXZ(int x, int z) {
+        return x > -LIMIT && x < LIMIT && z > -LIMIT && z < LIMIT;
     }
 
     void set(int x, int y, int z, int b) {
@@ -54,25 +97,39 @@ final class World {
     }
 
     void set(int x, int y, int z, int b, int m) {
-        if (!inside(x, y, z)) return;
-        int i = idx(x, y, z);
-        blocks[i] = (char) b;
-        meta[i] = (byte) m;
-        if (b != Blocks.AIR && y > maxHeight) maxHeight = y;
-        // Mark chunks whose mesh, ambient occlusion or shadows could change: the
-        // neighbours, plus everything this block can cast a shadow onto (away from the sun).
+        if (!insideY(y) || !insideXZ(x, z)) return;
+        Chunk c = chunk(x >> 4, z >> 4);
+        if (c == null) return;
+        int i = Chunk.idx(x & 15, y, z & 15);
+        c.blocks[i] = (char) b;
+        c.meta[i] = (byte) m;
+        c.modified = true;
+        if (b != Blocks.AIR && y > c.maxY) c.maxY = y;
+        // Rebuild every chunk whose mesh, ambient occlusion or shadows could change.
         int reach = Math.min(y, SHADOW_STEPS);
         int xMin = (int) Math.floor(x - reach * SUN_DX) - 1, zMin = (int) Math.floor(z - reach * SUN_DZ) - 1;
-        for (int cx = Math.max(0, xMin) / CS; cx <= Math.min(SX - 1, x + 1) / CS; cx++)
-            for (int cz = Math.max(0, zMin) / CS; cz <= Math.min(SZ - 1, z + 1) / CS; cz++)
-                chunkDirty[cx * CZ + cz] = true;
+        for (int cx = xMin >> 4; cx <= (x + 1) >> 4; cx++)
+            for (int cz = zMin >> 4; cz <= (z + 1) >> 4; cz++) {
+                Chunk n = chunk(cx, cz);
+                if (n != null) n.dirty.set(true);
+            }
+    }
+
+    /** Collision query: unloaded chunks and the world limit act as walls. */
+    boolean solidAt(int x, int y, int z) {
+        if (y < 0) return true;
+        if (y >= SY) return false;
+        if (!insideXZ(x, z)) return true;
+        Chunk c = chunk(x >> 4, z >> 4);
+        if (c == null) return true;
+        return Blocks.isSolid(c.blocks[Chunk.idx(x & 15, y, z & 15)]);
     }
 
     /** How much light passes through a block (1 = clear, 0 = blocks it). */
     static float transmit(int b) {
         if (b == Blocks.AIR) return 1f;
         if (Blocks.isOpaque(b)) return 0f;
-        if (b == Blocks.LEAVES || b == Blocks.AUTUMN_LEAVES || b == Blocks.BLOSSOM_LEAVES) return 0.55f;
+        if (Blocks.isLeaves(b)) return 0.55f;
         if (Blocks.isWater(b)) return 0.8f;
         if (b == Blocks.GLASS) return 0.92f;
         int shape = Blocks.shape(b);
@@ -82,224 +139,6 @@ final class World {
         return 0.6f; // doors, trapdoors
     }
 
-    /** Fraction of direct sunlight reaching the centre of a cell (soft shadows from leaves). */
-    float sunlight(int x, int y, int z) {
-        float t = 1f;
-        float fx = x + 0.5f, fz = z + 0.5f;
-        for (int k = 1; k <= SHADOW_STEPS; k++) {
-            int py = y + k;
-            if (py > maxHeight) return t;
-            fx += SUN_DX;
-            fz += SUN_DZ;
-            int px = (int) Math.floor(fx), pz = (int) Math.floor(fz);
-            if (px < 0 || pz < 0 || px >= SX || pz >= SZ) return t;
-            t *= transmit(blocks[idx(px, py, pz)]);
-            if (t < 0.03f) return 0f;
-        }
-        return t;
-    }
-
-    void recomputeMaxHeight() {
-        maxHeight = 0;
-        for (int i = 0; i < blocks.length; i++) {
-            if (blocks[i] != Blocks.AIR) {
-                int y = i % SY;
-                if (y > maxHeight) maxHeight = y;
-            }
-        }
-    }
-
-    void markAllDirty() {
-        Arrays.fill(chunkDirty, true);
-    }
-
-    int topY(int x, int z) {
-        for (int y = SY - 1; y >= 0; y--) {
-            if (blocks[idx(x, y, z)] != Blocks.AIR) return y;
-        }
-        return 0;
-    }
-
-    void generate(long seed, boolean flat) {
-        this.seed = seed;
-        Arrays.fill(blocks, (char) 0);
-        Arrays.fill(meta, (byte) 0);
-        if (flat) {
-            for (int x = 0; x < SX; x++)
-                for (int z = 0; z < SZ; z++)
-                    for (int y = 0; y <= FLAT_TOP; y++) {
-                        int b = y == 0 ? Blocks.BEDROCK : y < FLAT_TOP - 3 ? Blocks.STONE
-                                : y < FLAT_TOP ? Blocks.DIRT : Blocks.GRASS;
-                        blocks[idx(x, y, z)] = (char) b;
-                    }
-            maxHeight = FLAT_TOP;
-            markAllDirty();
-            return;
-        }
-        Noise hills = new Noise(seed);
-        Noise mountains = new Noise(seed * 31 + 7);
-        Noise floor = new Noise(seed * 17 + 3);
-        Noise river = new Noise(seed * 101 + 13);
-        Random rnd = new Random(seed);
-        int[] height = new int[SX * SZ];
-
-        for (int x = 0; x < SX; x++) {
-            for (int z = 0; z < SZ; z++) {
-                float h1 = hills.fbm(x / 40f, z / 40f, 4);
-                float m = mountains.fbm(x / 70f, z / 70f, 3);
-                float mount = Math.max(0f, m - 0.5f) * 2f;
-                mount *= mount;
-                int h = (int) (12 + h1 * 18 + mount * 30);
-                if (h < 3) h = 3;
-                if (h > SY - 8) h = SY - 8;
-
-                // Winding rivers: a channel along a noise contour, with earthy banks.
-                boolean channel = false, bank = false;
-                float rd = Math.abs(river.fbm(x / 80f, z / 80f, 3) - 0.5f);
-                if (rd < 0.06f && h >= SEA - 1) {
-                    float t = rd / 0.06f;
-                    if (t < 0.45f) {
-                        h = Math.min(h, SEA - 2 - (int) ((0.45f - t) / 0.45f * 2.5f));
-                        channel = true;
-                    } else {
-                        h = Math.min(h, SEA + (int) ((t - 0.45f) / 0.55f * 4f));
-                        bank = true;
-                    }
-                }
-                height[x * SZ + z] = h;
-
-                boolean beach = h <= SEA + 1 && !bank;
-                boolean rocky = h >= 40;
-                float f = floor.value(x / 9f, z / 9f);
-                int bed = Blocks.SAND;
-                if (channel) bed = f < 0.4f ? Blocks.COBBLE : f < 0.7f ? Blocks.GRAVEL : Blocks.MOSSY_COBBLE;
-                else if (h < SEA - 1) bed = f < 0.33f ? Blocks.GRAVEL : f > 0.7f ? Blocks.CLAY : Blocks.SAND;
-                int bankTop = f < 0.35f ? Blocks.FOREST_FLOOR : f < 0.55f ? Blocks.COARSE_DIRT : Blocks.GRASS;
-                for (int y = 0; y <= h; y++) {
-                    int b;
-                    if (y == 0) b = Blocks.BEDROCK;
-                    else if (y < h - 3) b = ore(y, rnd);
-                    else if (channel) b = y >= h - 1 ? bed : Blocks.STONE;
-                    else if (bank && y == h) b = bankTop;
-                    else if (bank) b = Blocks.DIRT;
-                    else if (beach) b = bed;
-                    else if (rocky) b = (y == h && h >= 45) ? Blocks.SNOW : Blocks.STONE;
-                    else b = (y == h) ? Blocks.GRASS : Blocks.DIRT;
-                    blocks[idx(x, y, z)] = (char) b;
-                }
-                for (int y = h + 1; y <= SEA; y++) blocks[idx(x, y, z)] = (char) Blocks.WATER;
-            }
-        }
-
-        // Trees
-        for (int x = 3; x < SX - 3; x++) {
-            for (int z = 3; z < SZ - 3; z++) {
-                int h = height[x * SZ + z];
-                if (blocks[idx(x, h, z)] != Blocks.GRASS) continue;
-                if (rnd.nextFloat() > 0.014f) continue;
-                float kind = rnd.nextFloat();
-                if (kind < 0.6f) growTree(x, h + 1, z, rnd, Blocks.LOG, Blocks.LEAVES, 0);
-                else if (kind < 0.82f) growTree(x, h + 1, z, rnd, Blocks.LIGHT_LOG, Blocks.LEAVES, 1);
-                else if (kind < 0.94f) growTree(x, h + 1, z, rnd, Blocks.LOG, Blocks.AUTUMN_LEAVES, 0);
-                else growTree(x, h + 1, z, rnd, Blocks.DARK_LOG, Blocks.BLOSSOM_LEAVES, 0);
-            }
-        }
-        decorate(height, rnd, seed);
-        recomputeMaxHeight();
-        markAllDirty();
-    }
-
-    /** Ground cover: grass, ferns, flowers, wheat fields, forest floor, vines and seagrass. */
-    private void decorate(int[] height, Random rnd, long seed) {
-        Noise fields = new Noise(seed * 7 + 5), flowers = new Noise(seed * 13 + 11);
-        for (int x = 0; x < SX; x++) {
-            for (int z = 0; z < SZ; z++) {
-                int h = height[x * SZ + z];
-                if (h + 2 >= SY) continue;
-                int top = blocks[idx(x, h, z)];
-                int above = blocks[idx(x, h + 1, z)];
-                if (above == Blocks.WATER) {
-                    // Seagrass on the bed of water at least two deep.
-                    if (h + 2 <= SEA && rnd.nextFloat() < 0.3f) blocks[idx(x, h + 1, z)] = (char) Blocks.SEAGRASS;
-                    continue;
-                }
-                if (above != Blocks.AIR) continue;
-                boolean shaded = false;
-                for (int y = h + 2; y < Math.min(SY, h + 10); y++) {
-                    int b = blocks[idx(x, y, z)];
-                    if (b == Blocks.LEAVES || b == Blocks.AUTUMN_LEAVES || b == Blocks.BLOSSOM_LEAVES) { shaded = true; break; }
-                }
-                float r = rnd.nextFloat();
-                if (top == Blocks.GRASS && shaded) {
-                    // Forest floor under the trees.
-                    if (r < 0.35f) blocks[idx(x, h, z)] = (char) Blocks.FOREST_FLOOR;
-                    float q = rnd.nextFloat();
-                    int plant = q < 0.2f ? Blocks.LEAF_LITTER : q < 0.28f ? Blocks.MOSS_CARPET
-                            : q < 0.4f ? Blocks.FERN : q < 0.55f ? Blocks.GRASS_TUFT : q < 0.6f ? Blocks.BUSH : 0;
-                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
-                } else if (top == Blocks.GRASS) {
-                    int plant = 0;
-                    if (fields.value(x / 14f, z / 14f) > 0.74f) {
-                        if (r < 0.85f) plant = Blocks.WHEAT;
-                    } else if (flowers.value(x / 9f, z / 9f) > 0.68f && r < 0.45f) {
-                        float k = flowers.value(x / 23f + 50, z / 23f);
-                        plant = k < 0.3f ? Blocks.RED_FLOWER : k < 0.5f ? Blocks.YELLOW_FLOWER
-                                : k < 0.7f ? Blocks.WHITE_FLOWER : Blocks.BLUE_FLOWER;
-                    } else if (r < 0.3f) plant = Blocks.GRASS_TUFT;
-                    else if (r < 0.33f) plant = Blocks.FERN;
-                    else if (r < 0.345f) plant = Blocks.BUSH;
-                    else if (r < 0.355f) plant = Blocks.RED_FLOWER + rnd.nextInt(4);
-                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
-                } else if (top == Blocks.FOREST_FLOOR || top == Blocks.COARSE_DIRT) {
-                    int plant = r < 0.12f ? Blocks.GRASS_TUFT : r < 0.17f ? Blocks.FERN
-                            : r < 0.3f ? Blocks.LEAF_LITTER : r < 0.36f ? Blocks.MOSS_CARPET
-                            : r < 0.39f ? Blocks.RED_FLOWER + rnd.nextInt(2) : 0;
-                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
-                }
-            }
-        }
-        // Vines hanging from the undersides of leaves.
-        for (int x = 0; x < SX; x++)
-            for (int z = 0; z < SZ; z++)
-                for (int y = 2; y < SY; y++) {
-                    int b = blocks[idx(x, y, z)];
-                    if (b != Blocks.LEAVES && b != Blocks.AUTUMN_LEAVES) continue;
-                    if (blocks[idx(x, y - 1, z)] != Blocks.AIR || rnd.nextFloat() > 0.12f) continue;
-                    int len = 1 + rnd.nextInt(3);
-                    for (int k = 1; k <= len && y - k > 0 && blocks[idx(x, y - k, z)] == Blocks.AIR
-                            && blocks[idx(x, y - k - 1, z)] == Blocks.AIR; k++)
-                        blocks[idx(x, y - k, z)] = (char) Blocks.VINES;
-                }
-    }
-
-    /** Stone with the occasional ore; rarer ores only appear deeper down. */
-    private static int ore(int y, Random rnd) {
-        float p = rnd.nextFloat();
-        if (p < 0.012f) return Blocks.COAL_ORE;
-        if (p < 0.020f && y < 34) return Blocks.COPPER_ORE;
-        if (p < 0.024f && y < 20) return Blocks.GOLD_ORE;
-        if (p < 0.0258f && y < 12) return Blocks.CRYSTAL_ORE;
-        return Blocks.STONE;
-    }
-
-    private void growTree(int x, int y, int z, Random rnd, int log, int leaves, int extra) {
-        int th = 4 + rnd.nextInt(3) + extra;
-        if (y + th + 1 >= SY) return;
-        for (int i = 0; i < th; i++) blocks[idx(x, y + i, z)] = (char) log;
-        for (int ly = y + th - 3; ly <= y + th; ly++) {
-            int r = (ly >= y + th - 1) ? 1 : 2;
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    boolean corner = Math.abs(dx) == r && Math.abs(dz) == r;
-                    if (corner && (ly == y + th || rnd.nextBoolean())) continue;
-                    int bx = x + dx, bz = z + dz;
-                    if (!inside(bx, ly, bz)) continue;
-                    if (blocks[idx(bx, ly, bz)] == Blocks.AIR) blocks[idx(bx, ly, bz)] = (char) leaves;
-                }
-            }
-        }
-    }
-
     private final float[] rayBoxes = new float[6 * 4];
 
     /**
@@ -307,39 +146,40 @@ final class World {
      * out[3..5] the cell in front of the face that was hit and out[6] the face index
      * (0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z). hitPos receives the exact hit point.
      */
-    boolean raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxDist, int[] out, float[] hitPos) {
+    synchronized boolean raycast(double ox, double oy, double oz, float dx, float dy, float dz, float maxDist,
+                                 int[] out, double[] hitPos) {
         int x = (int) Math.floor(ox), y = (int) Math.floor(oy), z = (int) Math.floor(oz);
         int stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1, stepZ = dz > 0 ? 1 : -1;
-        float tdx = dx != 0 ? Math.abs(1f / dx) : Float.MAX_VALUE;
-        float tdy = dy != 0 ? Math.abs(1f / dy) : Float.MAX_VALUE;
-        float tdz = dz != 0 ? Math.abs(1f / dz) : Float.MAX_VALUE;
-        float tmx = dx != 0 ? (dx > 0 ? (x + 1 - ox) : (ox - x)) * tdx : Float.MAX_VALUE;
-        float tmy = dy != 0 ? (dy > 0 ? (y + 1 - oy) : (oy - y)) * tdy : Float.MAX_VALUE;
-        float tmz = dz != 0 ? (dz > 0 ? (z + 1 - oz) : (oz - z)) * tdz : Float.MAX_VALUE;
-        float t = 0;
+        double tdx = dx != 0 ? Math.abs(1.0 / dx) : Double.MAX_VALUE;
+        double tdy = dy != 0 ? Math.abs(1.0 / dy) : Double.MAX_VALUE;
+        double tdz = dz != 0 ? Math.abs(1.0 / dz) : Double.MAX_VALUE;
+        double tmx = dx != 0 ? (dx > 0 ? (x + 1 - ox) : (ox - x)) * tdx : Double.MAX_VALUE;
+        double tmy = dy != 0 ? (dy > 0 ? (y + 1 - oy) : (oy - y)) * tdy : Double.MAX_VALUE;
+        double tmz = dz != 0 ? (dz > 0 ? (z + 1 - oz) : (oz - z)) * tdz : Double.MAX_VALUE;
+        double t = 0;
         while (t <= maxDist) {
             int b = get(x, y, z);
             if (b != Blocks.AIR && b != Blocks.WATER) {
                 int n = Shapes.boxes(b, getMeta(x, y, z), rayBoxes);
-                float best = Float.MAX_VALUE;
+                double best = Double.MAX_VALUE;
                 int bestFace = -1;
                 for (int k = 0; k < n; k++) {
                     int o = k * 6;
-                    float tNear = -Float.MAX_VALUE, tFar = Float.MAX_VALUE;
+                    double tNear = -Double.MAX_VALUE, tFar = Double.MAX_VALUE;
                     int face = -1;
                     boolean miss = false;
                     for (int a = 0; a < 3 && !miss; a++) {
-                        float org = a == 0 ? ox : a == 1 ? oy : oz;
-                        float d = a == 0 ? dx : a == 1 ? dy : dz;
+                        double org = a == 0 ? ox : a == 1 ? oy : oz;
+                        double d = a == 0 ? dx : a == 1 ? dy : dz;
                         int base = a == 0 ? x : a == 1 ? y : z;
-                        float lo = base + rayBoxes[o + a], hi = base + rayBoxes[o + 3 + a];
-                        if (Math.abs(d) < 1e-9f) {
+                        double lo = base + rayBoxes[o + a], hi = base + rayBoxes[o + 3 + a];
+                        if (Math.abs(d) < 1e-9) {
                             if (org < lo || org > hi) miss = true;
                             continue;
                         }
-                        float t1 = (lo - org) / d, t2 = (hi - org) / d;
+                        double t1 = (lo - org) / d, t2 = (hi - org) / d;
                         int f1 = a * 2 + 1, f2 = a * 2; // entering through the low side = -axis face
-                        if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; int ft = f1; f1 = f2; f2 = ft; }
+                        if (t1 > t2) { double tmp = t1; t1 = t2; t2 = tmp; int ft = f1; f1 = f2; f2 = ft; }
                         if (t1 > tNear) { tNear = t1; face = f1; }
                         if (t2 < tFar) tFar = t2;
                         if (tNear > tFar) miss = true;
@@ -368,14 +208,17 @@ final class World {
     }
 
     /**
-     * Appends the collision boxes of a cell, in world coordinates, to out at offset n*6.
-     * Returns the new count. Cells outside the world sides and below it are solid.
+     * Appends the collision boxes of a cell to out (6 doubles each, world coordinates)
+     * and returns the new count.
      */
-    int collisionBoxes(int x, int y, int z, float[] out, int n) {
+    synchronized int collisionBoxes(int x, int y, int z, double[] out, int n) {
         int b;
-        if (x < 0 || z < 0 || x >= SX || z >= SZ || y < 0) b = Blocks.STONE;
+        if (y < 0 || !insideXZ(x, z)) b = Blocks.STONE;
         else if (y >= SY) return n;
-        else b = blocks[idx(x, y, z)];
+        else {
+            Chunk c = chunk(x >> 4, z >> 4);
+            b = c == null ? Blocks.STONE : c.blocks[Chunk.idx(x & 15, y, z & 15)];
+        }
         if (!Blocks.isSolid(b)) return n;
         int m = Shapes.boxes(b, getMeta(x, y, z), rayBoxes);
         for (int k = 0; k < m; k++) {

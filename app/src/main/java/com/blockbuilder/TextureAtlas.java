@@ -483,6 +483,13 @@ final class TextureAtlas {
                 put(Blocks.T_SEAGRASS, x, 15 - k, mix(0x2E6A3A, 0x6AB45A, k / (float) hgt), vary(0.06f));
             }
         }
+        // Conifer needles: dark, fine and streaky
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                boolean hole = r.nextFloat() < 0.13f;
+                float streak = ((x + y * 2) % 5 == 0) ? 0.75f : ((x * 3 + y) % 7 == 0 ? 1.15f : 1f);
+                if (!hole) put(Blocks.T_NEEDLES, x, y, 0x24502A, streak * vary(0.1f));
+            }
         // Moss: dense, soft, opaque
         for (int y = 0; y < TILE; y++)
             for (int x = 0; x < TILE; x++) {

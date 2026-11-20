@@ -29,11 +29,13 @@ final class Blocks {
     static final int GRASS_TUFT = 414, FERN = 415, BUSH = 416, RED_FLOWER = 417, YELLOW_FLOWER = 418,
             BLUE_FLOWER = 419, WHITE_FLOWER = 420, WHEAT = 421, VINES = 422, SEAGRASS = 423,
             MOSS_CARPET = 424, LEAF_LITTER = 425, COARSE_DIRT = 426, FOREST_FLOOR = 427, MOSS_BLOCK = 428;
-    static final int COUNT = 429;
+    /** Added in 1.8. */
+    static final int NEEDLES = 429;
+    static final int COUNT = 430;
     static final int T_GRASS_TUFT = 384, T_FERN = 385, T_BUSH = 386, T_RED_FLOWER = 387,
             T_YELLOW_FLOWER = 388, T_BLUE_FLOWER = 389, T_WHITE_FLOWER = 390, T_WHEAT = 391,
             T_VINES = 392, T_SEAGRASS = 393, T_MOSS = 394, T_LEAF_LITTER = 395, T_COARSE_DIRT = 396,
-            T_FOREST_FLOOR = 397;
+            T_FOREST_FLOOR = 397, T_NEEDLES = 398;
     /** Tiles for new stones start here (one tile each). */
     static final int T_STONE0 = 80 + Wood.ALL.length * 6 + 4; // right after the wood tiles
     /** Per stone: full block, stairs and slab ids. */
@@ -200,9 +202,11 @@ final class Blocks {
         def(COARSE_DIRT, "Coarse Dirt", T_COARSE_DIRT);
         def(FOREST_FLOOR, "Forest Floor", T_FOREST_FLOOR, T_DIRT, T_DIRT, SOLID);
         def(MOSS_BLOCK, "Moss Block", T_MOSS);
+        def(NEEDLES, "Conifer Needles", T_NEEDLES, T_NEEDLES, T_NEEDLES, CUTOUT);
 
         for (int b = 1; b < COUNT; b++) SOLID_FLAG[b] = b != WATER && SHAPE[b] != Shapes.CROSS;
         SWAY[LEAVES] = SWAY[AUTUMN_LEAVES] = SWAY[BLOSSOM_LEAVES] = 0.25f;
+        SWAY[NEEDLES] = 0.12f;
     }
 
     private static void plant(int id, String name, int tile, float sway) {
@@ -213,6 +217,10 @@ final class Blocks {
 
     static float sway(int b) {
         return SWAY[b];
+    }
+
+    static boolean isLeaves(int b) {
+        return b == LEAVES || b == AUTUMN_LEAVES || b == BLOSSOM_LEAVES || b == NEEDLES;
     }
 
     /** Water, or a block that sits in water (seagrass). */
@@ -254,7 +262,7 @@ final class Blocks {
                     VINES, SEAGRASS, MOSS_CARPET, LEAF_LITTER, MOSS_BLOCK},
             // Wood tab: these are shown under "Leaves & More"; species are listed separately.
             {LOG, PLANKS, LIGHT_LOG, LIGHT_PLANKS, DARK_LOG, DARK_PLANKS, LEAVES, AUTUMN_LEAVES,
-                    BLOSSOM_LEAVES, HAY, CRATE, BOOKSHELF},
+                    BLOSSOM_LEAVES, NEEDLES, HAY, CRATE, BOOKSHELF},
             {},
             {BRICK, STONE_BRICKS, MOSSY_BRICKS, POLISHED_STONE, TERRACOTTA, ROOF_TILES,
                     CHECKER, GLASS, METAL, LAMP},

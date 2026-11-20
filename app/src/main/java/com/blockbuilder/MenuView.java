@@ -251,7 +251,7 @@ final class MenuView extends FrameLayout {
         typesLp.topMargin = (int) (12 * dp);
         form.addView(types, typesLp);
         final boolean[] flat = {false};
-        final TextView normal = button("Normal terrain", GREEN, GREEN_DARK, 14);
+        final TextView normal = button("Endless biomes", GREEN, GREEN_DARK, 14);
         final TextView flatBtn = button("Flat (for building)", GREY, GREY_DARK, 14);
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -1, 1f);
         LinearLayout.LayoutParams half2 = new LinearLayout.LayoutParams(0, -1, 1f);

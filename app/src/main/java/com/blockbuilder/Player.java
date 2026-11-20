@@ -5,41 +5,27 @@ final class Player {
     static final float HW = 0.3f, H = 1.8f, EYE = 1.62f;
     static final float GRAVITY = 26f, JUMP_V = 8.4f, WALK = 4.5f, FLY = 11f, SWIM = 2.8f;
 
-    float x, y, z, vx, vy, vz, yaw, pitch;
+    double x, y, z;
+    float vx, vy, vz, yaw, pitch;
     boolean onGround, inWater, headInWater;
     private boolean hitWall;
     private final float[] look = new float[2];
 
     void spawn(World w) {
-        int cx = World.SX / 2, cz = World.SZ / 2;
-        // Spiral outward looking for dry land.
-        for (int r = 0; r < World.SX / 2; r++) {
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
-                    int px = cx + dx, pz = cz + dz;
-                    int top = w.topY(px, pz);
-                    int b = w.get(px, top, pz);
-                    if (b == Blocks.GRASS || b == Blocks.SAND) {
-                        place(px, top + 1, pz);
-                        return;
-                    }
-                }
-            }
-        }
-        place(cx, w.topY(cx, cz) + 1, cz);
+        int[] p = w.gen.findSpawn();
+        place(p[0], p[1], p[2]);
     }
 
-    private void place(int bx, int by, int bz) {
-        x = bx + 0.5f;
+    void place(int bx, int by, int bz) {
+        x = bx + 0.5;
         y = by;
-        z = bz + 0.5f;
+        z = bz + 0.5;
         vx = vy = vz = 0;
         yaw = 0.6f;
         pitch = -0.15f;
     }
 
-    float eyeY() {
+    double eyeY() {
         return y + EYE;
     }
 
@@ -89,6 +75,13 @@ final class Player {
             if (in.jump && onGround) vy = JUMP_V;
         }
 
+        // Spawned (or loaded) inside a tree or a wall: lift out to open space.
+        if (insideSolid(w)) {
+            y = Math.floor(y) + 1;
+            vx = vy = vz = 0;
+            return;
+        }
+
         hitWall = false;
         boolean wasOnGround = onGround;
         onGround = false;
@@ -110,18 +103,18 @@ final class Player {
         if (y < -20) spawn(w);
     }
 
-    private static int fl(float v) {
+    private static int fl(double v) {
         return (int) Math.floor(v);
     }
 
     // ------------------------------------------------------------ collision
 
-    private float[] boxes = new float[6 * 256];
+    private double[] boxes = new double[6 * 256];
     private int nBoxes;
-    private static final float STEP = 0.6f;
+    private static final double STEP = 0.6;
 
     /** Collects the boxes of every cell the player could touch while moving by (dx,dy,dz). */
-    private void gather(World w, float dx, float dy, float dz) {
+    private void gather(World w, double dx, double dy, double dz) {
         int x0 = fl(Math.min(x - HW, x - HW + dx)) - 1, x1 = fl(Math.max(x + HW, x + HW + dx)) + 1;
         int y0 = fl(Math.min(y, y + dy)) - 1, y1 = fl(Math.max(y + H, y + H + dy)) + 1;
         int z0 = fl(Math.min(z - HW, z - HW + dz)) - 1, z1 = fl(Math.max(z + HW, z + HW + dz)) + 1;
@@ -130,7 +123,7 @@ final class Player {
             for (int by = y0; by <= y1; by++)
                 for (int bz = z0; bz <= z1; bz++) {
                     if (boxes.length < (nBoxes + 4) * 6) {
-                        float[] nb = new float[boxes.length * 2];
+                        double[] nb = new double[boxes.length * 2];
                         System.arraycopy(boxes, 0, nb, 0, nBoxes * 6);
                         boxes = nb;
                     }
@@ -138,14 +131,25 @@ final class Player {
                 }
     }
 
-    /** Shortens a move along one axis so the player's box stops at the first box in the way. */
-    private float clip(int axis, float d) {
-        float px0 = x - HW, px1 = x + HW, py0 = y, py1 = y + H, pz0 = z - HW, pz1 = z + HW;
-        final float e = 1e-5f;
+    private boolean insideSolid(World w) {
+        gather(w, 0, 0, 0);
+        double e = 1e-4;
         for (int k = 0; k < nBoxes; k++) {
             int o = k * 6;
-            float bx0 = boxes[o], by0 = boxes[o + 1], bz0 = boxes[o + 2];
-            float bx1 = boxes[o + 3], by1 = boxes[o + 4], bz1 = boxes[o + 5];
+            if (boxes[o] < x + HW - e && boxes[o + 3] > x - HW + e && boxes[o + 1] < y + H - e && boxes[o + 4] > y + e
+                    && boxes[o + 2] < z + HW - e && boxes[o + 5] > z - HW + e) return true;
+        }
+        return false;
+    }
+
+    /** Shortens a move along one axis so the player's box stops at the first box in the way. */
+    private double clip(int axis, double d) {
+        double px0 = x - HW, px1 = x + HW, py0 = y, py1 = y + H, pz0 = z - HW, pz1 = z + HW;
+        final double e = 1e-5;
+        for (int k = 0; k < nBoxes; k++) {
+            int o = k * 6;
+            double bx0 = boxes[o], by0 = boxes[o + 1], bz0 = boxes[o + 2];
+            double bx1 = boxes[o + 3], by1 = boxes[o + 4], bz1 = boxes[o + 5];
             if (axis == 0) {
                 if (by1 <= py0 + e || by0 >= py1 - e || bz1 <= pz0 + e || bz0 >= pz1 - e) continue;
                 if (d > 0 && bx0 >= px1 - e) d = Math.min(d, bx0 - px1);
@@ -163,15 +167,15 @@ final class Player {
         return d;
     }
 
-    private void move(World w, float dx, float dy, float dz, boolean canStep) {
+    private void move(World w, double dx, double dy, double dz, boolean canStep) {
         gather(w, dx, dy + (canStep ? STEP : 0), dz);
-        float sx = x, sy = y, sz = z;
+        double sx = x, sy = y, sz = z;
 
-        float cy = clip(1, dy);
+        double cy = clip(1, dy);
         y += cy;
-        float cx = clip(0, dx);
+        double cx = clip(0, dx);
         x += cx;
-        float cz = clip(2, dz);
+        double cz = clip(2, dz);
         z += cz;
         boolean blocked = cx != dx || cz != dz;
 
@@ -180,18 +184,18 @@ final class Player {
 
         // Step up onto slabs, stairs and other low edges.
         if (blocked && canStep) {
-            float ax = x, ay = y, az = z;
+            double ax = x, ay = y, az = z;
             x = sx; y = sy; z = sz;
-            float up = clip(1, STEP);
+            double up = clip(1, STEP);
             y += up;
-            float qx = clip(0, dx);
+            double qx = clip(0, dx);
             x += qx;
-            float qz = clip(2, dz);
+            double qz = clip(2, dz);
             z += qz;
-            float want = -up + Math.min(0, dy);
-            float down = clip(1, want);
+            double want = -up + Math.min(0, dy);
+            double down = clip(1, want);
             y += down;
-            if (qx * qx + qz * qz > cx * cx + cz * cz + 1e-6f) {
+            if (qx * qx + qz * qz > cx * cx + cz * cz + 1e-6) {
                 cx = qx; cz = qz;
                 landed = down != want;
                 bumped = false;

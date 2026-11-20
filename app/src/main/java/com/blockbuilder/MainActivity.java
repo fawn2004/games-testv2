@@ -9,8 +9,11 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
+import java.io.File;
+
 public class MainActivity extends Activity implements MenuView.Listener {
     private GLSurfaceView glView;   // non-null while a world is being played
+    private GameRenderer renderer;
     private World world;
     private Player player;
     private InputState input;
@@ -40,14 +43,16 @@ public class MainActivity extends Activity implements MenuView.Listener {
     public void onPlay(WorldStore.Meta meta) {
         if (glView != null) return;
         current = meta;
-        world = new World();
+        world = new World(meta.seed, meta.flat);
         player = new Player();
         input = new InputState();
-        if (SaveManager.load(WorldStore.dataFile(this, meta), world, player, input)) {
-            meta.seed = world.seed;
-        } else {
-            world.generate(meta.seed, meta.flat);
+        File dir = WorldStore.worldDir(this, meta);
+        // Worlds from versions 1.0 - 1.7 were a single file: convert them to chunk files once.
+        File legacy = WorldStore.dataFile(this, meta);
+        if (legacy.exists() && !new File(dir, "player.dat").exists()) SaveManager.migrateLegacy(legacy, dir, world.gen);
+        if (!SaveManager.loadPlayer(dir, player, input)) {
             player.spawn(world);
+            if (meta.flat) player.place(0, World.FLAT_TOP + 1, 0);
         }
         meta.lastPlayed = System.currentTimeMillis();
         WorldStore.saveMeta(this, meta);
@@ -55,7 +60,8 @@ public class MainActivity extends Activity implements MenuView.Listener {
         glView = new GLSurfaceView(this);
         glView.setEGLContextClientVersion(2);
         glView.setPreserveEGLContextOnPause(true);
-        glView.setRenderer(new GameRenderer(world, player, input));
+        renderer = new GameRenderer(world, player, input, dir);
+        glView.setRenderer(renderer);
 
         HudView hud = new HudView(this, input, this::exitToMenu);
         FrameLayout root = new FrameLayout(this);
@@ -68,7 +74,7 @@ public class MainActivity extends Activity implements MenuView.Listener {
     private void saveGame() {
         if (glView == null || current == null) return;
         glView.onPause(); // blocks until the GL thread has paused, so the world is safe to read
-        SaveManager.save(WorldStore.dataFile(this, current), world, player, input);
+        renderer.saveAll();
         current.lastPlayed = System.currentTimeMillis();
         WorldStore.saveMeta(this, current);
     }
@@ -76,11 +82,14 @@ public class MainActivity extends Activity implements MenuView.Listener {
     private void exitToMenu() {
         if (glView == null) return;
         saveGame();
+        renderer.shutdown();
         glView = null;
+        renderer = null;
         world = null;
         player = null;
         input = null;
         current = null;
+        Village.clearCache();
         showMenu();
     }
 

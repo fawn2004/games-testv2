@@ -11,6 +11,10 @@ final class InputState {
     volatile boolean flying;
     volatile boolean breakMode;
     volatile int selected;
+    /** Name of the biome or village the player is in (shown by the HUD). */
+    volatile String place = "";
+    /** True until the ground under the player has been generated. */
+    volatile boolean loading = true;
     final int[] hotbar = {Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.PLANKS, Blocks.LOG,
             Blocks.GLASS, Blocks.BRICK, Blocks.RED, Blocks.BLUE};
 

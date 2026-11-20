@@ -25,6 +25,12 @@ final class WorldStore {
         return d;
     }
 
+    /** Folder holding a world's player file and changed chunks. */
+    static File worldDir(Context ctx, Meta m) {
+        return new File(dir(ctx), m.id);
+    }
+
+    /** Single-file save used by versions 1.0 - 1.7 (converted on first open). */
     static File dataFile(Context ctx, Meta m) {
         return new File(dir(ctx), m.id + ".dat");
     }
@@ -97,9 +103,17 @@ final class WorldStore {
     }
 
     static void delete(Context ctx, Meta m) {
+        deleteTree(worldDir(ctx, m));
+        new File(dataFile(ctx, m).getPath() + ".old").delete();
         dataFile(ctx, m).delete();
         new File(dataFile(ctx, m).getPath() + ".tmp").delete();
         metaFile(ctx, m.id).delete();
+    }
+
+    private static void deleteTree(File f) {
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) deleteTree(k);
+        f.delete();
     }
 
     /** Moves the single save from version 1.0 into the world list. */

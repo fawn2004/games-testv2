@@ -4,10 +4,23 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 
 ![Block Builder](docs/screenshot-ground.jpg)
 
+| Medieval | Fantasy | Darwin |
+| --- | --- | --- |
+| ![](docs/village-medieval.jpg) | ![](docs/village-fantasy.jpg) | ![](docs/village-darwin.jpg) |
+
 **Download:** [`apk/BlockBuilder.apk`](apk/BlockBuilder.apk). Open it on an Android 5.0+ phone and allow
 "install unknown apps" when asked.
 
 ## Features
+- Near-infinite worlds (20 million blocks across) streamed in chunks around you, 96 blocks tall;
+  only chunks you change are saved
+- 55 biomes: one for every wood species (oak woodlands, birch groves, spruce taiga, redwood forests,
+  mahogany jungles, cypress swamps, savannas...) plus mixed ones (Mixed Woodland, Temperate and
+  Tropical Rainforest, Autumn Hills, Blossom Valley, Shrubland, Meadow, Snowy Peaks, Tropical Marsh)
+- Tree shapes per family: broad, round, slender, cone, pine, giant, tropical, savanna, cedar,
+  cypress, palm and shrubs
+- Themed villages: Medieval (timber-frame cottages, church, well), Fantasy (cone-roofed towers,
+  crystal fountain) and Darwin (raised tropical houses on stilts with verandas and metal roofs)
 - Title screen to create, play and delete multiple worlds (normal or flat terrain, optional seed)
 - 128 × 128 × 64 world with procedural hills, mountains with snow, beaches, lakes and trees
 - Blocks in six tabs: Natural, Wood, Stone, Building, Minerals and Colors (16 colors),

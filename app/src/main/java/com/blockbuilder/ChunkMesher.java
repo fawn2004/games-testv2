@@ -58,7 +58,36 @@ final class ChunkMesher {
     private final boolean[] skyDone = new boolean[MW * MW];
     private int cx0, cz0;
     private World w;
+    private Chunk center;
+    /** The 5x5 chunks around the one being meshed (long shadows reach two chunks). */
+    private final Chunk[] nb = new Chunk[25];
+    private int ncx, ncz, nbMaxY;
     private final Noise tintNoise = new Noise(4242);
+
+    /** Block lookup through the neighbourhood (falls back to the world further away). */
+    private int get(int x, int y, int z) {
+        if (y < 0) return Blocks.BEDROCK;
+        if (y >= World.SY) return Blocks.AIR;
+        int i = (x >> 4) - ncx + 2, j = (z >> 4) - ncz + 2;
+        if (i < 0 || j < 0 || i > 4 || j > 4) return w.get(x, y, z);
+        Chunk c = nb[i * 5 + j];
+        return c == null ? Blocks.AIR : c.blocks[Chunk.idx(x & 15, y, z & 15)];
+    }
+
+    /** Fraction of direct sunlight reaching the centre of a cell (soft shadows through leaves). */
+    private float sunlight(int x, int y, int z) {
+        float t = 1f;
+        float fx = x + 0.5f, fz = z + 0.5f;
+        for (int k = 1; k <= World.SHADOW_STEPS; k++) {
+            int py = y + k;
+            if (py > nbMaxY) return t;
+            fx += World.SUN_DX;
+            fz += World.SUN_DZ;
+            t *= World.transmit(get((int) Math.floor(fx), py, (int) Math.floor(fz)));
+            if (t < 0.03f) return 0f;
+        }
+        return t;
+    }
 
     private static boolean shouldEmit(int b, int n) {
         if (n == Blocks.AIR) return true;
@@ -69,7 +98,7 @@ final class ChunkMesher {
     }
 
     private int occ(int x, int y, int z) {
-        return Blocks.isOpaque(w.get(x, y, z)) ? 1 : 0;
+        return Blocks.isOpaque(get(x, y, z)) ? 1 : 0;
     }
 
     private int cacheIdx(int x, int y, int z) {
@@ -83,10 +112,10 @@ final class ChunkMesher {
         if (y >= World.SY) return 1f;
         if (y < 0) return 0f;
         int i = cacheIdx(x, y, z);
-        if (i < 0) return w.sunlight(x, y, z);
+        if (i < 0) return sunlight(x, y, z);
         float v = sunCache[i];
         if (v < 0) {
-            v = w.sunlight(x, y, z);
+            v = sunlight(x, y, z);
             sunCache[i] = v;
         }
         return v;
@@ -103,15 +132,27 @@ final class ChunkMesher {
             float t = 1f;
             for (int yy = World.SY - 1; yy >= 0; yy--) {
                 skyCache[col * World.SY + yy] = t;
-                t *= World.transmit(w.get(x, yy, z));
+                t *= World.transmit(get(x, yy, z));
             }
             skyDone[col] = true;
         }
         return skyCache[col * World.SY + y];
     }
 
-    void build(World world, int cx, int cz, FloatBuilder solid, FloatBuilder water) {
+    /** Meshes a chunk. Vertex positions are relative to the chunk's corner. */
+    void build(World world, Chunk chunk, FloatBuilder solid, FloatBuilder water) {
         w = world;
+        center = chunk;
+        int cx = chunk.cx, cz = chunk.cz;
+        ncx = cx;
+        ncz = cz;
+        nbMaxY = 0;
+        for (int i = 0; i < 5; i++)
+            for (int j = 0; j < 5; j++) {
+                Chunk c = (i == 2 && j == 2) ? chunk : world.chunk(cx + i - 2, cz + j - 2);
+                nb[i * 5 + j] = c;
+                if (c != null && c.maxY > nbMaxY) nbMaxY = c.maxY;
+            }
         cx0 = cx * World.CS;
         cz0 = cz * World.CS;
         Arrays.fill(sunCache, -1f);
@@ -122,7 +163,8 @@ final class ChunkMesher {
             for (int z = cz0; z < cz0 + World.CS; z++) {
                 float[] tint = tint(x, z);
                 for (int y = 0; y < World.SY; y++) {
-                    int b = w.blocks[World.idx(x, y, z)];
+                    int ci = Chunk.idx(x - cx0, y, z - cz0);
+                    int b = center.blocks[ci];
                     if (b == Blocks.AIR) continue;
                     int shape = Blocks.shape(b);
                     if (shape == Shapes.CROSS) {
@@ -130,21 +172,24 @@ final class ChunkMesher {
                         if (b != Blocks.SEAGRASS) continue;
                         b = Blocks.WATER; // seagrass stands in water: mesh the water too
                     } else if (shape != Shapes.CUBE) {
-                        shaped(x, y, z, b, w.meta[World.idx(x, y, z)], solid);
+                        shaped(x, y, z, b, center.meta[ci], solid);
                         continue;
                     }
                     boolean isWater = b == Blocks.WATER;
                     boolean glow = Blocks.isEmissive(b);
-                    boolean plant = b == Blocks.GRASS || b == Blocks.LEAVES;
+                    boolean plant = b == Blocks.GRASS;
+                    float[] leafTint = Blocks.isLeaves(b) && center.meta[ci] > 0
+                            && center.meta[ci] < Biome.LEAF_TINT.length ? Biome.LEAF_TINT[center.meta[ci]] : null;
+                    if (b == Blocks.LEAVES && leafTint == null) plant = true;
                     float jitter = 0.97f + 0.06f * hash(x, y, z);
                     FloatBuilder out = isWater ? water : solid;
                     float waterTop = 1f;
-                    if (isWater && !Blocks.isWater(w.get(x, y + 1, z))) waterTop = 0.875f;
+                    if (isWater && !Blocks.isWater(get(x, y + 1, z))) waterTop = 0.875f;
                     float sway = Blocks.sway(b);
                     for (int f = 0; f < 6; f++) {
                         int[] d = DIR[f];
                         int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-                        int nb = w.get(nx, ny, nz);
+                        int nb = get(nx, ny, nz);
                         if (!shouldEmit(b, nb)) continue;
                         float flags = sway + (!isWater && Blocks.isWater(nb) ? 2f : 0f);
                         int tile = Blocks.tile(b, f);
@@ -205,6 +250,8 @@ final class ChunkMesher {
                                 light(i, f, AO[ao[i]], sunV, skyV, jitter);
                                 if (plant && (f == 2 || b == Blocks.LEAVES)) {
                                     vr[i] *= tint[0]; vg[i] *= tint[1]; vb[i] *= tint[2];
+                                } else if (leafTint != null) {
+                                    vr[i] *= leafTint[0]; vg[i] *= leafTint[1]; vb[i] *= leafTint[2];
                                 }
                             }
                         }
@@ -233,13 +280,16 @@ final class ChunkMesher {
         vb[i] = jitter * (SUN_B * ndl * aoSun + (SKY_B * sky + BOUNCE_B * bounce * skyV) * aoAmb + MIN_B);
     }
 
-    /** Gentle large-scale variation in plant colour: drier yellow-green to lush blue-green. */
+    /** Plant colour: the biome's grass colour plus gentle local variation. */
     private float[] tint(int x, int z) {
-        float n = tintNoise.fbm(x / 28f, z / 28f, 2);
+        int packed = center.tint[(x - cx0) * 16 + (z - cz0)];
+        float br = ((packed >> 16) & 255) / 128f, bg = ((packed >> 8) & 255) / 128f, bb = (packed & 255) / 128f;
+        if (packed == 0) { br = bg = bb = 1f; }
+        float n = tintNoise.fbm(x / 28.0, z / 28.0, 2);
         float k = Math.max(0f, Math.min(1f, (n - 0.3f) * 2.5f));
-        tintBuf[0] = 1.08f - 0.16f * k;
-        tintBuf[1] = 1.02f - 0.02f * k;
-        tintBuf[2] = 0.82f + 0.24f * k;
+        tintBuf[0] = br * (1.06f - 0.12f * k);
+        tintBuf[1] = bg * (1.02f - 0.02f * k);
+        tintBuf[2] = bb * (0.86f + 0.2f * k);
         return tintBuf;
     }
 
@@ -271,7 +321,7 @@ final class ChunkMesher {
                 float flags = 0f;
                 if (onEdge) {
                     int[] d = DIR[f];
-                    int nb = w.get(x + d[0], y + d[1], z + d[2]);
+                    int nb = get(x + d[0], y + d[1], z + d[2]);
                     if (Blocks.isOpaque(nb)) continue;
                     if (Blocks.isWater(nb)) flags = 2f;
                     sunV = sun(x + d[0], y + d[1], z + d[2]);
@@ -349,6 +399,6 @@ final class ChunkMesher {
     }
 
     private void emit(FloatBuilder out, int i) {
-        out.vertex(vx[i], vy[i], vz[i], vu[i], vv[i], vr[i], vg[i], vb[i], vf[i]);
+        out.vertex(vx[i] - cx0, vy[i], vz[i] - cz0, vu[i], vv[i], vr[i], vg[i], vb[i], vf[i]);
     }
 }
