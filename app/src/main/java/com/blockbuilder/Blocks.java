@@ -23,7 +23,13 @@ final class Blocks {
     static final int W_LOG = 0, W_PLANKS = 1, W_STAIRS = 2, W_SLAB = 3, W_DOOR = 4, W_TRAPDOOR = 5,
             PIECES = 6;
     static final String[] PIECE_NAMES = {"Log", "Planks", "Stairs", "Slab", "Door", "Trapdoor"};
-    static final int COUNT = FIRST_WOOD + Wood.ALL.length * PIECES;
+    static final int FIRST_STONE = FIRST_WOOD + Wood.ALL.length * PIECES;
+    static final int COUNT = FIRST_STONE + Stone.newCount() + Stone.ALL.length * 2;
+    /** Tiles for new stones start here (one tile each). */
+    static final int T_STONE0 = 80 + Wood.ALL.length * 6 + 4; // right after the wood tiles
+    /** Per stone: full block, stairs and slab ids. */
+    static final int[] STONE_FULL = new int[Stone.ALL.length], STONE_STAIRS = new int[Stone.ALL.length],
+            STONE_SLAB = new int[Stone.ALL.length];
     /** Wood tiles start here; each species uses six tiles: log side, log top, planks, door lower, door upper, trapdoor. */
     static final int T_WOOD0 = 80;
 
@@ -51,6 +57,8 @@ final class Blocks {
     private static final int[] SHAPE = new int[COUNT];
     /** For wood pieces: the species index, otherwise -1. */
     private static final int[] SPECIES = new int[COUNT];
+    /** Full block that two slabs of this block merge into. */
+    private static final int[] FULL = new int[COUNT];
 
     private static final int SOLID = 0, CUTOUT = 1, CLEAR = 2;
 
@@ -139,6 +147,27 @@ final class Blocks {
             SHAPE[id + W_DOOR] = Shapes.DOOR;
             SHAPE[id + W_TRAPDOOR] = Shapes.TRAPDOOR;
             for (int k = 0; k < PIECES; k++) SPECIES[id + k] = i;
+            FULL[id + W_SLAB] = id + W_PLANKS;
+        }
+
+        int next = FIRST_STONE, newTile = T_STONE0;
+        for (int i = 0; i < Stone.ALL.length; i++) {
+            Stone st = Stone.ALL[i];
+            int full = st.existing;
+            if (full < 0) {
+                full = next++;
+                def(full, st.name, newTile++);
+            }
+            int stairs = next++, slab = next++;
+            int[] t = TILES[full];
+            def(stairs, st.name + " Stairs", t[0], t[1], t[2], CUTOUT);
+            def(slab, st.name + " Slab", t[0], t[1], t[2], CUTOUT);
+            SHAPE[stairs] = Shapes.STAIRS;
+            SHAPE[slab] = Shapes.SLAB;
+            FULL[slab] = full;
+            STONE_FULL[i] = full;
+            STONE_STAIRS[i] = stairs;
+            STONE_SLAB[i] = slab;
         }
     }
 
@@ -155,10 +184,9 @@ final class Blocks {
         return SHAPE[b];
     }
 
-    /** Planks of the same species, for merging two slabs. */
-    static int planksOf(int b) {
-        int s = SPECIES[b];
-        return s < 0 ? b : wood(s, W_PLANKS);
+    /** The full block two slabs of this kind merge into. */
+    static int fullOf(int b) {
+        return FULL[b] != 0 ? FULL[b] : b;
     }
 
     /** Door texture: lower half uses the side tile, upper half the "bottom" tile slot. */
@@ -166,22 +194,76 @@ final class Blocks {
         return upper ? TILES[b][2] : TILES[b][1];
     }
 
-    static final int WOOD_TAB = 1;
+    static final int WOOD_TAB = 1, STONE_TAB = 2;
 
-    /** Inventory tabs. */
-    static final String[] CATEGORY_NAMES = {"Natural", "Wood", "Building", "Minerals", "Colors"};
+    /** Inventory tabs. Wood and Stone are browsed by group instead (see GROUPS). */
+    static final String[] CATEGORY_NAMES = {"Natural", "Wood", "Stone", "Building", "Minerals", "Colors"};
     static final int[][] CATEGORIES = {
             {GRASS, DIRT, STONE, COBBLE, MOSSY_COBBLE, GRAVEL, SAND, RED_SAND, CLAY,
-                    MUD, SNOW, ICE, GRANITE, MARBLE, SLATE, BASALT, OBSIDIAN, WATER},
+                    MUD, SNOW, ICE, WATER},
             // Wood tab: these are shown under "Leaves & More"; species are listed separately.
             {LOG, PLANKS, LIGHT_LOG, LIGHT_PLANKS, DARK_LOG, DARK_PLANKS, LEAVES, AUTUMN_LEAVES,
                     BLOSSOM_LEAVES, HAY, CRATE, BOOKSHELF},
-            {BRICK, STONE_BRICKS, MOSSY_BRICKS, POLISHED_STONE, SANDSTONE, TERRACOTTA, ROOF_TILES,
+            {},
+            {BRICK, STONE_BRICKS, MOSSY_BRICKS, POLISHED_STONE, TERRACOTTA, ROOF_TILES,
                     CHECKER, GLASS, METAL, LAMP},
             {COAL_ORE, COPPER_ORE, GOLD_ORE, CRYSTAL_ORE, COPPER_BLOCK, GOLD_BLOCK, CRYSTAL_BLOCK},
             {RED, ORANGE, YELLOW, LIME, GREEN, CYAN, LIGHT_BLUE, BLUE, PURPLE, MAGENTA, PINK,
                     BROWN, WHITE, LIGHT_GRAY, GRAY, BLACK},
     };
+
+    /** A named set of blocks shown together in the picker (one wood species, one stone, ...). */
+    static final class Group {
+        final String name, section, info;
+        final int[] items;
+        final int icon;
+
+        Group(String name, String section, String info, int[] items, int icon) {
+            this.name = name;
+            this.section = section;
+            this.info = info;
+            this.items = items;
+            this.icon = icon;
+        }
+    }
+
+    /** For each tab, its groups, or null when the tab shows a plain grid. */
+    static final Group[][] GROUPS = new Group[CATEGORY_NAMES.length][];
+    /** Index of the group a block belongs to within its tab, or -1. */
+    private static final int[] GROUP_OF = new int[COUNT];
+
+    static {
+        java.util.Arrays.fill(GROUP_OF, -1);
+        Group[] wood = new Group[Wood.ALL.length + 1];
+        wood[0] = new Group("Leaves & More", null, null, CATEGORIES[WOOD_TAB], LEAVES);
+        for (int i = 0; i < Wood.ALL.length; i++) {
+            Wood w = Wood.ALL[i];
+            int[] items = new int[PIECES];
+            for (int k = 0; k < PIECES; k++) items[k] = wood(i, k);
+            String info = w.name + (w.name.endsWith(w.family) ? "" : "  \u00b7  " + w.family + " family")
+                    + "  \u00b7  " + (w.softwood ? "softwood" : "hardwood")
+                    + "   (log, planks, stairs, slab, door, trapdoor)";
+            wood[i + 1] = new Group(w.name, w.softwood ? "SOFTWOODS (CONIFER)" : "HARDWOODS", info, items,
+                    wood(i, W_LOG));
+            for (int b : items) GROUP_OF[b] = i + 1;
+        }
+        GROUPS[WOOD_TAB] = wood;
+
+        Group[] stone = new Group[Stone.ALL.length];
+        for (int i = 0; i < Stone.ALL.length; i++) {
+            Stone st = Stone.ALL[i];
+            int[] items = {STONE_FULL[i], STONE_STAIRS[i], STONE_SLAB[i]};
+            String kind = st.section.split(" ")[0].toLowerCase();
+            stone[i] = new Group(st.name, st.section, st.name + "  \u00b7  " + kind + "   (block, stairs, slab)",
+                    items, STONE_FULL[i]);
+            for (int b : items) GROUP_OF[b] = i;
+        }
+        GROUPS[STONE_TAB] = stone;
+    }
+
+    static int groupOf(int b) {
+        return GROUP_OF[b];
+    }
 
     /** face: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z */
     static int tile(int b, int face) {

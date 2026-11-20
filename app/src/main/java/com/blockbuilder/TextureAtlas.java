@@ -349,6 +349,147 @@ final class TextureAtlas {
             }
     }
 
+    private static void paintStone(int t, Stone s) {
+        int b = s.base, a = s.accent, a2 = s.accent2;
+        switch (s.style) {
+            case Stone.S_PORES: {   // pumice, tufa: light rock full of holes
+                noisy(t, b, 0.06f);
+                int n = s.name.equals("Tufa") ? 9 : 22;
+                for (int i = 0; i < n; i++) {
+                    int x = r.nextInt(16), y = r.nextInt(16), size = s.name.equals("Tufa") ? 2 : 1;
+                    for (int dy = 0; dy < size; dy++)
+                        for (int dx = 0; dx < size + (r.nextBoolean() ? 1 : 0); dx++)
+                            if (x + dx < 16 && y + dy < 16) set(t, x + dx, y + dy, argb(shade(a, vary(0.1f))));
+                }
+                break;
+            }
+            case Stone.S_SPECKLE:   // dolerite, diorite: salt & pepper crystals
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float p = r.nextFloat();
+                        int c = p < 0.2f ? a : p < 0.32f ? a2 : b;
+                        set(t, x, y, argb(shade(c, vary(0.06f))));
+                    }
+                break;
+            case Stone.S_FLOW:      // rhyolite: wavy flow banding
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float v = (float) Math.sin(y * 0.9f + Math.sin(x * 0.5f) * 1.8f);
+                        int c = v > 0.55f ? a : v < -0.7f ? a2 : b;
+                        set(t, x, y, argb(shade(c, vary(0.05f))));
+                    }
+                break;
+            case Stone.S_ASHLAR:    // Portland stone: smooth dressed blocks
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        int off = (y / 8) % 2 == 0 ? 0 : 8;
+                        boolean joint = y % 8 == 7 || (x + off) % 16 == 15;
+                        set(t, x, y, argb(shade(joint ? a : b, joint ? 1f : vary(0.025f))));
+                    }
+                break;
+            case Stone.S_BANDS:     // travertine: horizontal bands and small voids
+                for (int y = 0; y < TILE; y++) {
+                    float band = (y % 5 == 0) ? 0.9f : (y % 5 == 3 ? 1.05f : 1f);
+                    for (int x = 0; x < TILE; x++) {
+                        int c = shade((y % 5 == 0) ? a : b, band * vary(0.03f));
+                        if (r.nextFloat() < 0.05f) c = shade(a2, vary(0.06f));
+                        set(t, x, y, argb(c));
+                    }
+                }
+                break;
+            case Stone.S_PEBBLES: { // conglomerate: rounded pebbles in a sandy matrix
+                noisy(t, b, 0.08f);
+                int[] cols = {a, a2, 0x8C5A3E, 0xB0A898, 0x4E4A46};
+                for (int i = 0; i < 9; i++) {
+                    float cx = r.nextFloat() * 16, cy = r.nextFloat() * 16, rad = 1.3f + r.nextFloat() * 1.6f;
+                    int c = cols[r.nextInt(cols.length)];
+                    for (int y = 0; y < TILE; y++)
+                        for (int x = 0; x < TILE; x++) {
+                            float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+                            float d = (float) Math.sqrt(dx * dx + dy * dy);
+                            if (d < rad) set(t, x, y, argb(shade(c, (d < rad - 0.8f ? 1.08f : 0.85f) * vary(0.05f))));
+                        }
+                }
+                break;
+            }
+            case Stone.S_LAMINA:    // shale: thin layers
+                for (int y = 0; y < TILE; y++) {
+                    int c = y % 2 == 0 ? b : (y % 6 == 3 ? a2 : a);
+                    for (int x = 0; x < TILE; x++) set(t, x, y, argb(shade(c, vary(0.05f))));
+                }
+                break;
+            case Stone.S_FLINT:     // knapped flint nodules with pale crust, set in mortar
+                cells(t, 13, b, 0xC8C0AE, 1.3f, 0);
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        int c = px[((t / PER_ROW) * TILE + y) * SIZE + (t % PER_ROW) * TILE + x] & 0xFFFFFF;
+                        if (c != 0 && ((c >> 16) & 255) < 90 && r.nextFloat() < 0.08f) set(t, x, y, argb(shade(a, vary(0.05f))));
+                    }
+                break;
+            case Stone.S_SPARKLE:   // quartzite: sugary with bright glints
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float p = r.nextFloat();
+                        int c = p < 0.07f ? a : p < 0.25f ? a2 : b;
+                        set(t, x, y, argb(shade(c, vary(0.04f))));
+                    }
+                break;
+            case Stone.S_GNEISS:    // strongly banded light / dark
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float v = (float) Math.sin(y * 0.75f + Math.sin(x * 0.4f) * 1.2f);
+                        int c = v > 0.3f ? b : v < -0.4f ? a : a2;
+                        set(t, x, y, argb(shade(c, vary(0.06f))));
+                    }
+                break;
+            case Stone.S_SCHIST:    // silvery foliation with garnets
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float v = (float) Math.sin(y * 1.3f + x * 0.35f + Math.sin(x * 0.8f));
+                        set(t, x, y, argb(shade(v > 0.5f ? a : b, vary(0.06f))));
+                    }
+                for (int i = 0; i < 4; i++) {
+                    int x = r.nextInt(15), y = r.nextInt(15);
+                    set(t, x, y, argb(a2));
+                    set(t, x + 1, y, argb(shade(a2, 0.8f)));
+                    set(t, x, y + 1, argb(shade(a2, 0.7f)));
+                }
+                break;
+            case Stone.S_VEINS:     // soapstone, alabaster: soft with faint veins
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float v = (float) Math.sin(x * 0.45f - y * 0.3f + Math.sin(y * 0.7f + x * 0.2f) * 2.2f);
+                        set(t, x, y, argb(shade(Math.abs(v) < 0.12f ? a : b, vary(0.025f))));
+                    }
+                break;
+            case Stone.S_ONYX:      // onyx: curved concentric bands
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++) {
+                        float dx = x - 3f, dy = y - 18f;
+                        float d = (float) Math.sqrt(dx * dx + dy * dy) + (float) Math.sin(x * 0.6f) * 0.8f;
+                        int band = ((int) (d * 0.9f)) % 4;
+                        int c = band == 0 ? a : band == 2 ? a2 : b;
+                        set(t, x, y, argb(shade(c, vary(0.03f))));
+                    }
+                break;
+            case Stone.S_FLAGS:     // flagstone: irregular pavers with wide joints
+                cells(t, 4, b, a, 1.6f, 0);
+                break;
+            case Stone.S_FOSSIL:    // limestone: pale with shell fragments
+                noisy(t, b, 0.04f);
+                for (int i = 0; i < 5; i++) {
+                    int x = 1 + r.nextInt(13), y = 1 + r.nextInt(13);
+                    set(t, x, y, argb(a)); set(t, x + 1, y, argb(a)); set(t, x + 2, y + 1, argb(shade(a, 0.9f)));
+                    set(t, x - 1, y + 1, argb(shade(a, 0.9f)));
+                }
+                break;
+            default:                // plain: chalk, mudstone
+                for (int y = 0; y < TILE; y++)
+                    for (int x = 0; x < TILE; x++)
+                        set(t, x, y, argb(shade(r.nextFloat() < 0.1f ? a : b, vary(0.03f))));
+        }
+    }
+
     private static int[] paint() {
         px = new int[SIZE * SIZE];
         r = new Random(1337);
@@ -548,6 +689,8 @@ final class TextureAtlas {
 
         // ---------------- extra colors
         for (int i = 0; i < Wood.ALL.length; i++) paintWood(Blocks.T_WOOD0 + i * 6, Wood.ALL[i], i);
+        int st = Blocks.T_STONE0;
+        for (Stone s : Stone.ALL) if (s.existing < 0) paintStone(st++, s);
 
         int[] more = {0xF29BB8, 0x8CD63C, 0x2AA6A6, 0x7DB8F0, 0x7A4E2E, 0x6A6A70, 0xAEAEB4, 0xC03CB0};
         for (int i = 0; i < more.length; i++) colorBlock(Blocks.T_COLOR8 + i, more[i], false);

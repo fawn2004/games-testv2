@@ -29,8 +29,8 @@ final class HudView extends View {
     private float invX, invY, invCell, invTabY, invTabH, invTop, invBottom, invLeft, invRight;
     private static final int INV_COLS = 9;
     private int invTab;
-    /** Wood tab: -2 = species list, -1 = "Leaves & More", otherwise the species shown. */
-    private int woodView = -2;
+    /** Grouped tabs (Wood, Stone): -1 = list of groups, otherwise the group being shown. */
+    private int groupView = -1;
     private float invScroll, invContentH;
     private int invPid = -1;
     private float invDownX, invDownY, invLastY;
@@ -203,33 +203,38 @@ final class HudView extends View {
         nEntries = 0;
         float width = invCell * INV_COLS;
         float y = 0;
-        if (invTab == Blocks.WOOD_TAB && woodView == -2) {
+        Blocks.Group[] groups = Blocks.GROUPS[invTab];
+        if (groups != null && groupView < 0) {
+            // List of groups with section headers.
             int cols = 3;
             float cw = width / cols, ch = 42 * dp;
-            addEntry(E_SPECIES, -1, "Leaves & More", 0, y, cw, ch);
-            y += ch + 8 * dp;
-            int firstSoft = Wood.firstSoftwood();
-            for (int part = 0; part < 2; part++) {
-                addEntry(E_HEADER, 0, part == 0 ? "HARDWOODS" : "SOFTWOODS (CONIFER)", 0, y, width, 26 * dp);
-                y += 28 * dp;
-                int from = part == 0 ? 0 : firstSoft, to = part == 0 ? firstSoft : Wood.ALL.length;
-                for (int i = from; i < to; i++) {
-                    int k = i - from;
-                    addEntry(E_SPECIES, i, Wood.ALL[i].name, (k % cols) * cw, y + (k / cols) * ch, cw, ch);
+            String section = "";
+            int k = 0;
+            for (int i = 0; i < groups.length; i++) {
+                Blocks.Group g = groups[i];
+                String sec = g.section == null ? "" : g.section;
+                if (!sec.equals(section) || i == 0) {
+                    if (k > 0) y += ((k + cols - 1) / cols) * ch + 10 * dp;
+                    k = 0;
+                    section = sec;
+                    if (!sec.isEmpty()) {
+                        addEntry(E_HEADER, 0, sec, 0, y, width, 26 * dp);
+                        y += 28 * dp;
+                    }
                 }
-                y += ((to - from + cols - 1) / cols) * ch + 10 * dp;
+                addEntry(E_SPECIES, i, g.name, (k % cols) * cw, y + (k / cols) * ch, cw, ch);
+                k++;
             }
+            y += ((k + cols - 1) / cols) * ch + 10 * dp;
         } else {
             int[] list;
-            if (invTab == Blocks.WOOD_TAB) {
-                addEntry(E_BACK, 0, "\u2190  All woods", 0, y, width / 3, 40 * dp);
+            Blocks.Group g = null;
+            if (groups != null) {
+                g = groups[groupView];
+                addEntry(E_BACK, 0, invTab == Blocks.STONE_TAB ? "\u2190  All stones" : "\u2190  All woods",
+                        0, y, width / 3, 40 * dp);
                 y += 48 * dp;
-                if (woodView == -1) {
-                    list = Blocks.CATEGORIES[Blocks.WOOD_TAB];
-                } else {
-                    list = new int[Blocks.PIECES];
-                    for (int k = 0; k < Blocks.PIECES; k++) list[k] = Blocks.wood(woodView, k);
-                }
+                list = g.items;
             } else {
                 list = Blocks.CATEGORIES[invTab];
             }
@@ -237,12 +242,8 @@ final class HudView extends View {
                 addEntry(E_BLOCK, list[i], null, (i % INV_COLS) * invCell, y + (i / INV_COLS) * invCell, invCell, invCell);
             }
             y += ((list.length + INV_COLS - 1) / INV_COLS) * invCell;
-            if (invTab == Blocks.WOOD_TAB && woodView >= 0) {
-                Wood wd = Wood.ALL[woodView];
-                String label = wd.name + (wd.name.endsWith(wd.family) ? "" : "  \u00b7  " + wd.family + " family")
-                        + "  \u00b7  " + (wd.softwood ? "softwood" : "hardwood")
-                        + "   (log, planks, stairs, slab, door, trapdoor)";
-                addEntry(E_HEADER, 0, label, 0, y + 4 * dp, width, 26 * dp);
+            if (g != null && g.info != null) {
+                addEntry(E_HEADER, 0, g.info, 0, y + 4 * dp, width, 26 * dp);
                 y += 34 * dp;
             }
         }
@@ -308,12 +309,13 @@ final class HudView extends View {
                     break;
                 default: { // species chip or back button
                     rect.set(x + 3 * dp, y + 3 * dp, x + eW[i] - 3 * dp, y + eH[i] - 3 * dp);
-                    boolean current = eKind[i] == E_SPECIES && Blocks.species(sel) == eValue[i] && eValue[i] >= 0;
+                    boolean current = eKind[i] == E_SPECIES && Blocks.GROUPS[invTab] != null
+                            && contains(Blocks.GROUPS[invTab][eValue[i]].items, sel);
                     fill.setColor(eKind[i] == E_BACK ? 0xFF505868 : current ? 0xFF56607A : 0xFF3A4150);
                     c.drawRoundRect(rect, 8 * dp, 8 * dp, fill);
                     float tx = rect.left + 10 * dp;
                     if (eKind[i] == E_SPECIES) {
-                        int swatch = eValue[i] >= 0 ? Blocks.wood(eValue[i], Blocks.W_LOG) : Blocks.LEAVES;
+                        int swatch = Blocks.GROUPS[invTab][eValue[i]].icon;
                         float is = rect.height() - 6 * dp;
                         rect2.set(rect.left + 4 * dp, rect.top + 3 * dp, rect.left + 4 * dp + is, rect.top + 3 * dp + is);
                         Bitmap b = BlockIcons.icon(getContext(), swatch);
@@ -341,6 +343,11 @@ final class HudView extends View {
             rect.set(invRight - 7 * dp, barY, invRight - 3 * dp, barY + barH);
             c.drawRoundRect(rect, 2 * dp, 2 * dp, fill);
         }
+    }
+
+    private static boolean contains(int[] a, int v) {
+        for (int x : a) if (x == v) return true;
+        return false;
     }
 
     private void drawIcon(Canvas c, int block, RectF r) {
@@ -533,7 +540,7 @@ final class HudView extends View {
             float tw = (invRight - invLeft - 16 * dp) / nt;
             int t = (int) Math.floor((x - invLeft - 8 * dp) / tw);
             if (t >= 0 && t < nt) {
-                if (t == invTab && t == Blocks.WOOD_TAB) woodView = -2; // tap Wood again: back to the list
+                if (t != invTab || Blocks.GROUPS[t] != null) groupView = -1; // tap again: back to the list
                 invTab = t;
                 invScroll = 0;
                 layoutEntries();
@@ -575,13 +582,13 @@ final class HudView extends View {
                     invOpen = false;
                     return;
                 case E_SPECIES:
-                    woodView = eValue[i];
+                    groupView = eValue[i];
                     invScroll = 0;
                     layoutEntries();
                     haptic();
                     return;
                 case E_BACK:
-                    woodView = -2;
+                    groupView = -1;
                     invScroll = 0;
                     layoutEntries();
                     haptic();

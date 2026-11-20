@@ -224,11 +224,11 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 int b = input.selectedBlock();
                 int shape = Blocks.shape(b);
                 int face = hit[6];
-                // Two matching slabs make a full block of planks.
+                // Two matching slabs make a full block.
                 if (shape == Shapes.SLAB && hb == b) {
                     boolean top = (hm & Shapes.TOP) != 0;
                     if ((!top && face == 2) || (top && face == 3)) {
-                        world.set(hx, hy, hz, Blocks.planksOf(b));
+                        world.set(hx, hy, hz, Blocks.fullOf(b));
                         continue;
                     }
                 }
@@ -238,7 +238,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                 if (cur != Blocks.AIR && cur != Blocks.WATER) {
                     // Fill the other half of a slab cell.
                     if (shape == Shapes.SLAB && cur == b) {
-                        world.set(px, py, pz, Blocks.planksOf(b));
+                        world.set(px, py, pz, Blocks.fullOf(b));
                     }
                     continue;
                 }
