@@ -104,6 +104,14 @@ public class MainActivity extends Activity implements MenuView.Listener {
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        // The app went to the background: save and go back to the world list,
+        // so opening the app again always starts at the menu.
+        if (glView != null) exitToMenu();
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) hideSystemUi();

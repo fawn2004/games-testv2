@@ -109,7 +109,25 @@ final class MenuView extends FrameLayout {
         cLp.topMargin = (int) (10 * dp);
         column.addView(create, cLp);
 
+        TextView version = new TextView(ctx);
+        version.setText("v" + versionName(ctx));
+        version.setTextColor(0xCCFFFFFF);
+        version.setTextSize(12);
+        version.setShadowLayer(3 * dp, 0, dp, 0xAA000000);
+        LayoutParams vLp = new LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        vLp.rightMargin = (int) (10 * dp);
+        vLp.bottomMargin = (int) (6 * dp);
+        addView(version, vLp);
+
         refresh();
+    }
+
+    private static String versionName(Context ctx) {
+        try {
+            return ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     // ---------------------------------------------------------------- world list
