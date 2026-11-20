@@ -10,6 +10,11 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 - 128 × 128 × 64 world with procedural hills, mountains with snow, beaches, lakes and trees
 - 64 placeable blocks in five tabs: Natural, Wood, Building, Minerals and Colors (16 colors),
   including ores, three kinds of wood, bookshelves, crates, roof tiles, metal and a glow lamp
+- 46 real-world wood species (hardwoods such as White Oak, Black Walnut, Teak and Zebrano, and
+  softwoods such as Scots Pine, Douglas Fir and Redwood), each with its own log, planks, stairs,
+  slab, door and trapdoor
+- Stairs and slabs face the way you look and go upside-down / on top when you tap the upper half of a
+  block; doors and trapdoors open and close when tapped in Build mode; two slabs merge into planks
 - Worlds generate ores underground, gravel and clay lake beds, and four kinds of trees
 - Ambient-occlusion lighting, distance fog, translucent water and an underwater tint
 - Walking with auto-jump, swimming, and a fly mode
@@ -24,7 +29,8 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 | Break quickly | Hold a finger still on the right side |
 | Jump / swim up | JUMP button |
 | Fly | FLY button (then UP / DOWN) |
-| Pick blocks | Tap a hotbar slot, or tap **+** to choose any block (by tab) for the selected slot |
+| Pick blocks | Tap a hotbar slot, or tap **+** to choose any block (by tab) for the selected slot. In the Wood tab, pick a species to see its pieces; drag to scroll |
+| Open / close doors | Tap a door or trapdoor in Build mode |
 | Back to the world list | MENU button (top-left) or the phone's Back button |
 
 ## Building from source

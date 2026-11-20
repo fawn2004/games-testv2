@@ -93,13 +93,7 @@ final class Player {
         boolean wasOnGround = onGround;
         onGround = false;
         float dx = vx * dt, dy = vy * dt, dz = vz * dt;
-        int steps = (int) Math.ceil(Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))) / 0.3f);
-        if (steps < 1) steps = 1;
-        for (int i = 0; i < steps; i++) {
-            moveX(w, dx / steps);
-            moveZ(w, dz / steps);
-            moveY(w, dy / steps);
-        }
+        move(w, dx, dy, dz, wasOnGround && !flying);
 
         // Auto-jump onto single block ledges while walking.
         if (!flying && hitWall && (wasOnGround || onGround) && (mx * mx + my * my) > 0.04f) {
@@ -120,48 +114,97 @@ final class Player {
         return (int) Math.floor(v);
     }
 
-    private boolean collides(World w) {
-        int x0 = fl(x - HW), x1 = fl(x + HW - 1e-4f);
-        int y0 = fl(y), y1 = fl(y + H - 1e-4f);
-        int z0 = fl(z - HW), z1 = fl(z + HW - 1e-4f);
+    // ------------------------------------------------------------ collision
+
+    private float[] boxes = new float[6 * 256];
+    private int nBoxes;
+    private static final float STEP = 0.6f;
+
+    /** Collects the boxes of every cell the player could touch while moving by (dx,dy,dz). */
+    private void gather(World w, float dx, float dy, float dz) {
+        int x0 = fl(Math.min(x - HW, x - HW + dx)) - 1, x1 = fl(Math.max(x + HW, x + HW + dx)) + 1;
+        int y0 = fl(Math.min(y, y + dy)) - 1, y1 = fl(Math.max(y + H, y + H + dy)) + 1;
+        int z0 = fl(Math.min(z - HW, z - HW + dz)) - 1, z1 = fl(Math.max(z + HW, z + HW + dz)) + 1;
+        nBoxes = 0;
         for (int bx = x0; bx <= x1; bx++)
             for (int by = y0; by <= y1; by++)
-                for (int bz = z0; bz <= z1; bz++)
-                    if (w.solidAt(bx, by, bz)) return true;
-        return false;
+                for (int bz = z0; bz <= z1; bz++) {
+                    if (boxes.length < (nBoxes + 4) * 6) {
+                        float[] nb = new float[boxes.length * 2];
+                        System.arraycopy(boxes, 0, nb, 0, nBoxes * 6);
+                        boxes = nb;
+                    }
+                    nBoxes = w.collisionBoxes(bx, by, bz, boxes, nBoxes);
+                }
     }
 
-    private void moveX(World w, float d) {
-        if (d == 0) return;
-        x += d;
-        if (collides(w)) {
-            x = d > 0 ? fl(x + HW) - HW - 0.001f : fl(x - HW) + 1 + HW + 0.001f;
-            vx = 0;
-            hitWall = true;
-        }
-    }
-
-    private void moveZ(World w, float d) {
-        if (d == 0) return;
-        z += d;
-        if (collides(w)) {
-            z = d > 0 ? fl(z + HW) - HW - 0.001f : fl(z - HW) + 1 + HW + 0.001f;
-            vz = 0;
-            hitWall = true;
-        }
-    }
-
-    private void moveY(World w, float d) {
-        if (d == 0) return;
-        y += d;
-        if (collides(w)) {
-            if (d < 0) {
-                y = fl(y) + 1;
-                onGround = true;
+    /** Shortens a move along one axis so the player's box stops at the first box in the way. */
+    private float clip(int axis, float d) {
+        float px0 = x - HW, px1 = x + HW, py0 = y, py1 = y + H, pz0 = z - HW, pz1 = z + HW;
+        final float e = 1e-5f;
+        for (int k = 0; k < nBoxes; k++) {
+            int o = k * 6;
+            float bx0 = boxes[o], by0 = boxes[o + 1], bz0 = boxes[o + 2];
+            float bx1 = boxes[o + 3], by1 = boxes[o + 4], bz1 = boxes[o + 5];
+            if (axis == 0) {
+                if (by1 <= py0 + e || by0 >= py1 - e || bz1 <= pz0 + e || bz0 >= pz1 - e) continue;
+                if (d > 0 && bx0 >= px1 - e) d = Math.min(d, bx0 - px1);
+                else if (d < 0 && bx1 <= px0 + e) d = Math.max(d, bx1 - px0);
+            } else if (axis == 1) {
+                if (bx1 <= px0 + e || bx0 >= px1 - e || bz1 <= pz0 + e || bz0 >= pz1 - e) continue;
+                if (d > 0 && by0 >= py1 - e) d = Math.min(d, by0 - py1);
+                else if (d < 0 && by1 <= py0 + e) d = Math.max(d, by1 - py0);
             } else {
-                y = fl(y + H) - H - 0.001f;
+                if (bx1 <= px0 + e || bx0 >= px1 - e || by1 <= py0 + e || by0 >= py1 - e) continue;
+                if (d > 0 && bz0 >= pz1 - e) d = Math.min(d, bz0 - pz1);
+                else if (d < 0 && bz1 <= pz0 + e) d = Math.max(d, bz1 - pz0);
             }
-            vy = 0;
         }
+        return d;
+    }
+
+    private void move(World w, float dx, float dy, float dz, boolean canStep) {
+        gather(w, dx, dy + (canStep ? STEP : 0), dz);
+        float sx = x, sy = y, sz = z;
+
+        float cy = clip(1, dy);
+        y += cy;
+        float cx = clip(0, dx);
+        x += cx;
+        float cz = clip(2, dz);
+        z += cz;
+        boolean blocked = cx != dx || cz != dz;
+
+        boolean landed = cy != dy && dy < 0;
+        boolean bumped = cy != dy && dy > 0;
+
+        // Step up onto slabs, stairs and other low edges.
+        if (blocked && canStep) {
+            float ax = x, ay = y, az = z;
+            x = sx; y = sy; z = sz;
+            float up = clip(1, STEP);
+            y += up;
+            float qx = clip(0, dx);
+            x += qx;
+            float qz = clip(2, dz);
+            z += qz;
+            float want = -up + Math.min(0, dy);
+            float down = clip(1, want);
+            y += down;
+            if (qx * qx + qz * qz > cx * cx + cz * cz + 1e-6f) {
+                cx = qx; cz = qz;
+                landed = down != want;
+                bumped = false;
+                blocked = qx != dx || qz != dz;
+            } else {
+                x = ax; y = ay; z = az;
+            }
+        }
+
+        if (cx != dx) vx = 0;
+        if (cz != dz) vz = 0;
+        if (landed) { onGround = true; vy = 0; }
+        if (bumped) vy = 0;
+        hitWall = blocked;
     }
 }

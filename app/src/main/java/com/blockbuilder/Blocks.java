@@ -18,7 +18,14 @@ final class Blocks {
             COPPER_BLOCK = 55, GOLD_BLOCK = 56, CRYSTAL_BLOCK = 57,
             PINK = 58, LIME = 59, CYAN = 60, LIGHT_BLUE = 61, BROWN = 62, GRAY = 63,
             LIGHT_GRAY = 64, MAGENTA = 65;
-    static final int COUNT = 66;
+    static final int FIRST_WOOD = 66;
+    /** Each wood species gets six consecutive ids in this order. */
+    static final int W_LOG = 0, W_PLANKS = 1, W_STAIRS = 2, W_SLAB = 3, W_DOOR = 4, W_TRAPDOOR = 5,
+            PIECES = 6;
+    static final String[] PIECE_NAMES = {"Log", "Planks", "Stairs", "Slab", "Door", "Trapdoor"};
+    static final int COUNT = FIRST_WOOD + Wood.ALL.length * PIECES;
+    /** Wood tiles start here; each species uses six tiles: log side, log top, planks, door lower, door upper, trapdoor. */
+    static final int T_WOOD0 = 80;
 
     // Texture tile indices in the 16x16-tile atlas.
     static final int T_GRASS_TOP = 0, T_GRASS_SIDE = 1, T_DIRT = 2, T_STONE = 3, T_COBBLE = 4,
@@ -41,6 +48,9 @@ final class Blocks {
     static final int[][] TILES = new int[COUNT][];
     private static final boolean[] OPAQUE = new boolean[COUNT];
     private static final boolean[] EMISSIVE = new boolean[COUNT];
+    private static final int[] SHAPE = new int[COUNT];
+    /** For wood pieces: the species index, otherwise -1. */
+    private static final int[] SPECIES = new int[COUNT];
 
     private static final int SOLID = 0, CUTOUT = 1, CLEAR = 2;
 
@@ -111,13 +121,59 @@ final class Blocks {
         String[] moreColors = {"Pink", "Lime", "Cyan", "Light Blue", "Brown", "Gray", "Light Gray", "Magenta"};
         for (int i = 0; i < 8; i++) def(PINK + i, moreColors[i] + " Block", T_COLOR8 + i);
         EMISSIVE[LAMP] = true;
+        def(PLANKS, "Classic Oak Planks", T_PLANKS);
+        def(LOG, "Classic Oak Log", T_LOG_TOP, T_LOG_SIDE, T_LOG_TOP, SOLID);
+
+        java.util.Arrays.fill(SPECIES, -1);
+        for (int i = 0; i < Wood.ALL.length; i++) {
+            String n = Wood.ALL[i].name;
+            int id = wood(i, 0), t = T_WOOD0 + i * 6;
+            def(id + W_LOG, n + " Log", t + 1, t, t + 1, SOLID);
+            def(id + W_PLANKS, n + " Planks", t + 2);
+            def(id + W_STAIRS, n + " Stairs", t + 2, t + 2, t + 2, CUTOUT);
+            def(id + W_SLAB, n + " Slab", t + 2, t + 2, t + 2, CUTOUT);
+            def(id + W_DOOR, n + " Door", t + 3, t + 3, t + 4, CUTOUT);
+            def(id + W_TRAPDOOR, n + " Trapdoor", t + 5, t + 5, t + 5, CUTOUT);
+            SHAPE[id + W_STAIRS] = Shapes.STAIRS;
+            SHAPE[id + W_SLAB] = Shapes.SLAB;
+            SHAPE[id + W_DOOR] = Shapes.DOOR;
+            SHAPE[id + W_TRAPDOOR] = Shapes.TRAPDOOR;
+            for (int k = 0; k < PIECES; k++) SPECIES[id + k] = i;
+        }
     }
 
-    /** Inventory tabs. Each category holds at most 18 blocks (two rows of nine). */
+    /** Block id of a piece of a wood species. */
+    static int wood(int species, int piece) {
+        return FIRST_WOOD + species * PIECES + piece;
+    }
+
+    static int species(int b) {
+        return SPECIES[b];
+    }
+
+    static int shape(int b) {
+        return SHAPE[b];
+    }
+
+    /** Planks of the same species, for merging two slabs. */
+    static int planksOf(int b) {
+        int s = SPECIES[b];
+        return s < 0 ? b : wood(s, W_PLANKS);
+    }
+
+    /** Door texture: lower half uses the side tile, upper half the "bottom" tile slot. */
+    static int doorTile(int b, boolean upper) {
+        return upper ? TILES[b][2] : TILES[b][1];
+    }
+
+    static final int WOOD_TAB = 1;
+
+    /** Inventory tabs. */
     static final String[] CATEGORY_NAMES = {"Natural", "Wood", "Building", "Minerals", "Colors"};
     static final int[][] CATEGORIES = {
             {GRASS, DIRT, STONE, COBBLE, MOSSY_COBBLE, GRAVEL, SAND, RED_SAND, CLAY,
                     MUD, SNOW, ICE, GRANITE, MARBLE, SLATE, BASALT, OBSIDIAN, WATER},
+            // Wood tab: these are shown under "Leaves & More"; species are listed separately.
             {LOG, PLANKS, LIGHT_LOG, LIGHT_PLANKS, DARK_LOG, DARK_PLANKS, LEAVES, AUTUMN_LEAVES,
                     BLOSSOM_LEAVES, HAY, CRATE, BOOKSHELF},
             {BRICK, STONE_BRICKS, MOSSY_BRICKS, POLISHED_STONE, SANDSTONE, TERRACOTTA, ROOF_TILES,

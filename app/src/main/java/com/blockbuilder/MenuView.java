@@ -54,7 +54,7 @@ final class MenuView extends FrameLayout {
         paint.setFilterBitmap(false);
         grassSide = BlockIcons.tile(Blocks.T_GRASS_SIDE, false);
         dirt = BlockIcons.tile(Blocks.T_DIRT, false);
-        grassIcon = BlockIcons.get(ctx)[Blocks.GRASS];
+        grassIcon = BlockIcons.icon(ctx, Blocks.GRASS);
         Random r = new Random(7);
         clouds = new float[12];
         for (int i = 0; i < clouds.length; i += 3) {

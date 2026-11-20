@@ -10,7 +10,9 @@ final class World {
     static final int SEA = 21;
     static final int FLAT_TOP = 10;
 
-    final byte[] blocks = new byte[SX * SY * SZ];
+    final char[] blocks = new char[SX * SY * SZ];
+    /** Orientation / open state of shaped blocks (see Shapes). */
+    final byte[] meta = new byte[SX * SY * SZ];
     final boolean[] chunkDirty = new boolean[CX * CZ];
     long seed;
 
@@ -36,9 +38,20 @@ final class World {
         return x >= 0 && y >= 0 && z >= 0 && x < SX && y < SY && z < SZ;
     }
 
+    int getMeta(int x, int y, int z) {
+        if (!inside(x, y, z)) return 0;
+        return meta[idx(x, y, z)];
+    }
+
     void set(int x, int y, int z, int b) {
+        set(x, y, z, b, 0);
+    }
+
+    void set(int x, int y, int z, int b, int m) {
         if (!inside(x, y, z)) return;
-        blocks[idx(x, y, z)] = (byte) b;
+        int i = idx(x, y, z);
+        blocks[i] = (char) b;
+        meta[i] = (byte) m;
         // Mark this chunk and any neighbour whose mesh / AO could be affected.
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
@@ -62,14 +75,15 @@ final class World {
 
     void generate(long seed, boolean flat) {
         this.seed = seed;
-        Arrays.fill(blocks, (byte) 0);
+        Arrays.fill(blocks, (char) 0);
+        Arrays.fill(meta, (byte) 0);
         if (flat) {
             for (int x = 0; x < SX; x++)
                 for (int z = 0; z < SZ; z++)
                     for (int y = 0; y <= FLAT_TOP; y++) {
                         int b = y == 0 ? Blocks.BEDROCK : y < FLAT_TOP - 3 ? Blocks.STONE
                                 : y < FLAT_TOP ? Blocks.DIRT : Blocks.GRASS;
-                        blocks[idx(x, y, z)] = (byte) b;
+                        blocks[idx(x, y, z)] = (char) b;
                     }
             markAllDirty();
             return;
@@ -105,9 +119,9 @@ final class World {
                     else if (beach) b = bed;
                     else if (rocky) b = (y == h && h >= 45) ? Blocks.SNOW : Blocks.STONE;
                     else b = (y == h) ? Blocks.GRASS : Blocks.DIRT;
-                    blocks[idx(x, y, z)] = (byte) b;
+                    blocks[idx(x, y, z)] = (char) b;
                 }
-                for (int y = h + 1; y <= SEA; y++) blocks[idx(x, y, z)] = (byte) Blocks.WATER;
+                for (int y = h + 1; y <= SEA; y++) blocks[idx(x, y, z)] = (char) Blocks.WATER;
             }
         }
 
@@ -140,7 +154,7 @@ final class World {
     private void growTree(int x, int y, int z, Random rnd, int log, int leaves, int extra) {
         int th = 4 + rnd.nextInt(3) + extra;
         if (y + th + 1 >= SY) return;
-        for (int i = 0; i < th; i++) blocks[idx(x, y + i, z)] = (byte) log;
+        for (int i = 0; i < th; i++) blocks[idx(x, y + i, z)] = (char) log;
         for (int ly = y + th - 3; ly <= y + th; ly++) {
             int r = (ly >= y + th - 1) ? 1 : 2;
             for (int dx = -r; dx <= r; dx++) {
@@ -149,17 +163,20 @@ final class World {
                     if (corner && (ly == y + th || rnd.nextBoolean())) continue;
                     int bx = x + dx, bz = z + dz;
                     if (!inside(bx, ly, bz)) continue;
-                    if (blocks[idx(bx, ly, bz)] == Blocks.AIR) blocks[idx(bx, ly, bz)] = (byte) leaves;
+                    if (blocks[idx(bx, ly, bz)] == Blocks.AIR) blocks[idx(bx, ly, bz)] = (char) leaves;
                 }
             }
         }
     }
 
+    private final float[] rayBoxes = new float[6 * 4];
+
     /**
-     * Voxel raycast. Fills out[0..2] with the hit block and out[3..5] with the empty cell
-     * in front of the hit face. Returns false if nothing was hit within maxDist.
+     * Voxel raycast against the real block shapes. On a hit, out[0..2] is the block,
+     * out[3..5] the cell in front of the face that was hit and out[6] the face index
+     * (0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z). hitPos receives the exact hit point.
      */
-    boolean raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxDist, int[] out) {
+    boolean raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxDist, int[] out, float[] hitPos) {
         int x = (int) Math.floor(ox), y = (int) Math.floor(oy), z = (int) Math.floor(oz);
         int stepX = dx > 0 ? 1 : -1, stepY = dy > 0 ? 1 : -1, stepZ = dz > 0 ? 1 : -1;
         float tdx = dx != 0 ? Math.abs(1f / dx) : Float.MAX_VALUE;
@@ -168,16 +185,46 @@ final class World {
         float tmx = dx != 0 ? (dx > 0 ? (x + 1 - ox) : (ox - x)) * tdx : Float.MAX_VALUE;
         float tmy = dy != 0 ? (dy > 0 ? (y + 1 - oy) : (oy - y)) * tdy : Float.MAX_VALUE;
         float tmz = dz != 0 ? (dz > 0 ? (z + 1 - oz) : (oz - z)) * tdz : Float.MAX_VALUE;
-        int px = x, py = y, pz = z;
         float t = 0;
         while (t <= maxDist) {
             int b = get(x, y, z);
             if (b != Blocks.AIR && b != Blocks.WATER) {
-                out[0] = x; out[1] = y; out[2] = z;
-                out[3] = px; out[4] = py; out[5] = pz;
-                return true;
+                int n = Shapes.boxes(b, getMeta(x, y, z), rayBoxes);
+                float best = Float.MAX_VALUE;
+                int bestFace = -1;
+                for (int k = 0; k < n; k++) {
+                    int o = k * 6;
+                    float tNear = -Float.MAX_VALUE, tFar = Float.MAX_VALUE;
+                    int face = -1;
+                    boolean miss = false;
+                    for (int a = 0; a < 3 && !miss; a++) {
+                        float org = a == 0 ? ox : a == 1 ? oy : oz;
+                        float d = a == 0 ? dx : a == 1 ? dy : dz;
+                        int base = a == 0 ? x : a == 1 ? y : z;
+                        float lo = base + rayBoxes[o + a], hi = base + rayBoxes[o + 3 + a];
+                        if (Math.abs(d) < 1e-9f) {
+                            if (org < lo || org > hi) miss = true;
+                            continue;
+                        }
+                        float t1 = (lo - org) / d, t2 = (hi - org) / d;
+                        int f1 = a * 2 + 1, f2 = a * 2; // entering through the low side = -axis face
+                        if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; int ft = f1; f1 = f2; f2 = ft; }
+                        if (t1 > tNear) { tNear = t1; face = f1; }
+                        if (t2 < tFar) tFar = t2;
+                        if (tNear > tFar) miss = true;
+                    }
+                    if (miss || tFar < 0 || tNear < 0 || tNear > maxDist) continue;
+                    if (tNear < best) { best = tNear; bestFace = face; }
+                }
+                if (bestFace >= 0) {
+                    int[] d = ChunkMesher.DIR[bestFace];
+                    out[0] = x; out[1] = y; out[2] = z;
+                    out[3] = x + d[0]; out[4] = y + d[1]; out[5] = z + d[2];
+                    out[6] = bestFace;
+                    hitPos[0] = ox + dx * best; hitPos[1] = oy + dy * best; hitPos[2] = oz + dz * best;
+                    return true;
+                }
             }
-            px = x; py = y; pz = z;
             if (tmx < tmy && tmx < tmz) {
                 x += stepX; t = tmx; tmx += tdx;
             } else if (tmy < tmz) {
@@ -187,5 +234,25 @@ final class World {
             }
         }
         return false;
+    }
+
+    /**
+     * Appends the collision boxes of a cell, in world coordinates, to out at offset n*6.
+     * Returns the new count. Cells outside the world sides and below it are solid.
+     */
+    int collisionBoxes(int x, int y, int z, float[] out, int n) {
+        int b;
+        if (x < 0 || z < 0 || x >= SX || z >= SZ || y < 0) b = Blocks.STONE;
+        else if (y >= SY) return n;
+        else b = blocks[idx(x, y, z)];
+        if (!Blocks.isSolid(b)) return n;
+        int m = Shapes.boxes(b, getMeta(x, y, z), rayBoxes);
+        for (int k = 0; k < m; k++) {
+            int o = n * 6, s = k * 6;
+            out[o] = x + rayBoxes[s]; out[o + 1] = y + rayBoxes[s + 1]; out[o + 2] = z + rayBoxes[s + 2];
+            out[o + 3] = x + rayBoxes[s + 3]; out[o + 4] = y + rayBoxes[s + 4]; out[o + 5] = z + rayBoxes[s + 5];
+            n++;
+        }
+        return n;
     }
 }

@@ -6,9 +6,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Random;
 
-/** Procedurally painted 16x16-pixel tiles packed into a 256x256 atlas. */
+/** Procedurally painted 16x16-pixel tiles packed into a 512x512 atlas (32x32 tiles). */
 final class TextureAtlas {
-    static final int SIZE = 256, TILE = 16;
+    static final int SIZE = 512, TILE = 16, PER_ROW = 32;
     private static int[] cached;
 
     /** ARGB pixels (non-premultiplied). */
@@ -42,7 +42,7 @@ final class TextureAtlas {
     private static Random r;
 
     private static void set(int tile, int x, int y, int argb) {
-        px[((tile >> 4) * TILE + y) * SIZE + (tile & 15) * TILE + x] = argb;
+        px[((tile / PER_ROW) * TILE + y) * SIZE + (tile % PER_ROW) * TILE + x] = argb;
     }
 
     private static int shade(int rgb, float f) {
@@ -202,6 +202,150 @@ final class TextureAtlas {
                 int b = base;
                 if (darkEdge && (x == 0 || y == 0)) b = 0x55555C;
                 set(tile, x, y, argb(shade(b, f)));
+            }
+    }
+
+    private static int mix(int a, int b, float t) {
+        int ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+        int br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+        return ((int) (ar + (br - ar) * t) << 16) | ((int) (ag + (bg - ag) * t) << 8) | (int) (ab + (bb - ab) * t);
+    }
+
+    /** Six tiles per species: log side, log top, planks, door lower, door upper, trapdoor. */
+    private static void paintWood(int t, Wood w, int index) {
+        int side = t, top = t + 1, plank = t + 2, doorLo = t + 3, doorHi = t + 4, trap = t + 5;
+
+        // ---- bark
+        for (int x = 0; x < TILE; x++) {
+            float col = vary(0.06f);
+            for (int y = 0; y < TILE; y++) {
+                int c;
+                switch (w.barkStyle) {
+                    case Wood.B_SMOOTH:
+                        c = shade(w.bark, vary(0.05f) * (x % 7 == 0 ? 0.92f : 1f));
+                        break;
+                    case Wood.B_BIRCH:
+                        c = shade(w.bark, vary(0.04f));
+                        break;
+                    case Wood.B_PATCHY: {
+                        float n = (float) Math.sin(x * 0.9f + Math.sin(y * 0.7f) * 2f) + (float) Math.sin(y * 0.6f - x * 0.3f);
+                        c = shade(n > 0.4f ? w.accent : w.bark, vary(0.05f));
+                        break;
+                    }
+                    case Wood.B_FIBROUS:
+                        c = shade(w.bark, col * ((x % 3 == 0) ? 0.78f : 1.05f) * vary(0.05f));
+                        break;
+                    case Wood.B_LENTICEL:
+                        c = shade(w.bark, vary(0.06f) * ((y % 5 == 2 && (x + y) % 6 < 3) ? 1.0f : 0.95f));
+                        if (y % 5 == 2 && (x + y * 3) % 7 < 3) c = shade(w.accent, vary(0.05f));
+                        break;
+                    case Wood.B_SHAGGY:
+                        c = shade(w.bark, ((x + (y / 5)) % 4 == 0 ? 0.6f : 1.05f) * vary(0.08f));
+                        break;
+                    case Wood.B_PLATED: {
+                        int plate = ((y + (x / 4) * 3) / 5);
+                        boolean crack = (y + (x / 4) * 3) % 5 == 0 || x % 4 == 0;
+                        c = shade(w.bark, crack ? 0.68f : (0.95f + (plate % 3) * 0.05f) * vary(0.05f));
+                        break;
+                    }
+                    default: // furrowed
+                        c = shade(w.bark, ((x % 4 == 0) ? 0.7f : (x % 4 == 2 ? 0.9f : 1.04f)) * vary(0.08f));
+                }
+                set(side, x, y, argb(c));
+            }
+        }
+        if (w.barkStyle == Wood.B_BIRCH) {
+            for (int i = 0; i < 8; i++) {
+                int x = r.nextInt(12), y = r.nextInt(16), len = 2 + r.nextInt(3);
+                for (int k = 0; k < len; k++) set(side, x + k, y, argb(shade(w.accent, vary(0.1f))));
+            }
+        }
+
+        // ---- log top: rings with bark rim
+        int heart = shade(w.planks, 0.88f);
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                float ddx = x - 7.5f, ddy = y - 7.5f;
+                float d = (float) Math.sqrt(ddx * ddx + ddy * ddy);
+                int c;
+                if (d > 6.8f) c = shade(w.bark, vary(0.08f));
+                else if (d < 1.2f) c = shade(heart, 0.8f);
+                else c = shade(((int) (d * 1.2f)) % 2 == 0 ? w.planks : heart, vary(0.04f));
+                set(top, x, y, argb(c));
+            }
+
+        // ---- planks
+        int dark = w.accent != 0 ? w.accent : shade(w.planks, 0.78f);
+        for (int y = 0; y < TILE; y++) {
+            int row = y / 4;
+            int seam = (row * 7 + 3 + index) % 16;
+            float rowShade = 0.93f + ((row + index) % 2) * 0.07f;
+            for (int x = 0; x < TILE; x++) {
+                int c = shade(w.planks, rowShade * vary(0.04f));
+                switch (w.grain) {
+                    case Wood.G_STRONG:
+                        if ((x * 2 + row * 5 + (y % 4) * 3) % 9 == 0) c = shade(w.planks, 0.8f);
+                        break;
+                    case Wood.G_KNOTS:
+                        if ((x + row * 5) % 11 == 0 && y % 4 == 1) c = shade(w.accent, 0.8f);
+                        else if ((x * 3 + row) % 13 == 0) c = shade(w.planks, 0.86f);
+                        break;
+                    case Wood.G_STRIPES:
+                        if (((x + y * 2 + index) / 2) % 3 == 0) c = shade(dark, vary(0.06f));
+                        break;
+                    case Wood.G_RIBBON:
+                        if (((x + row * 3) / 3) % 2 == 0) c = shade(mix(w.planks, dark, 0.5f), vary(0.04f));
+                        break;
+                    case Wood.G_STREAKS:
+                        if ((x * 5 + row * 7) % 6 == 0) c = shade(dark, vary(0.06f));
+                        break;
+                    default:
+                        if ((x * 3 + row * 7) % 14 == 0) c = shade(w.planks, 0.9f);
+                }
+                if (y % 4 == 3 || x == seam) c = shade(w.planks, 0.6f);
+                set(plank, x, y, argb(c));
+            }
+        }
+
+        // ---- door (two halves) and trapdoor; three door designs cycle through the species
+        int frame = shade(w.planks, 0.72f), panel = shade(w.planks, 1.0f), inset = shade(w.planks, 0.86f);
+        int style = index % 3;
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                boolean edge = x <= 1 || x >= 14;
+                int lo, hi;
+                if (style == 0) {           // raised panels, solid
+                    boolean rail = y <= 1 || y >= 14;
+                    lo = (edge || rail) ? frame : ((x == 2 || y == 2) ? inset : panel);
+                    hi = lo;
+                } else if (style == 1) {    // glazed top half
+                    boolean rail = y <= 1 || y >= 14;
+                    lo = (edge || rail) ? frame : ((x == 2 || y == 2) ? inset : panel);
+                    boolean bar = x == 7 || x == 8 || y == 7 || y == 8;
+                    hi = (edge || y <= 1 || y >= 13 || bar) ? frame : 0;
+                } else {                    // vertical boards with a brace
+                    boolean gap = x % 4 == 3;
+                    lo = gap ? frame : panel;
+                    hi = lo;
+                    if (Math.abs((15 - y) - x) <= 1) lo = frame;
+                    if (y == 2 || y == 3) hi = frame;
+                    if (y == 12 || y == 13) lo = frame;
+                }
+                if (lo != 0) lo = argb(shade(lo, vary(0.04f)));
+                if (hi != 0) hi = argb(shade(hi, vary(0.04f)));
+                if (x == 12 && (y == 1 || y == 2)) lo = argb(0x3A3A3A); // handle (top of lower half)
+                set(doorLo, x, y, lo);
+                set(doorHi, x, y, hi);
+
+                int tc;
+                boolean tEdge = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+                if (index % 2 == 0) {       // grid trapdoor with holes
+                    boolean hole = !tEdge && (x % 5 != 2 && x % 5 != 3) && (y % 5 != 2 && y % 5 != 3) && x > 3 && x < 12 && y > 3 && y < 12;
+                    tc = hole ? 0 : argb(shade(tEdge ? frame : panel, vary(0.04f)));
+                } else {                    // solid boards
+                    tc = argb(shade((tEdge || y % 5 == 0) ? frame : panel, vary(0.04f)));
+                }
+                set(trap, x, y, tc);
             }
     }
 
@@ -403,6 +547,8 @@ final class TextureAtlas {
             }
 
         // ---------------- extra colors
+        for (int i = 0; i < Wood.ALL.length; i++) paintWood(Blocks.T_WOOD0 + i * 6, Wood.ALL[i], i);
+
         int[] more = {0xF29BB8, 0x8CD63C, 0x2AA6A6, 0x7DB8F0, 0x7A4E2E, 0x6A6A70, 0xAEAEB4, 0xC03CB0};
         for (int i = 0; i < more.length; i++) colorBlock(Blocks.T_COLOR8 + i, more[i], false);
 

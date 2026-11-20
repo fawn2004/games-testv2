@@ -15,7 +15,6 @@ final class HudView extends View {
 
     private final InputState in;
     private final float dp;
-    private final Bitmap[] icons;
     private final Runnable onMenu;
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -27,9 +26,21 @@ final class HudView extends View {
     private float menuX, menuY, menuR;
     private float jumpX, jumpY, jumpR, downX, downY, downR, modeX, modeY, modeR, flyX, flyY, flyR;
     private float slot, barX, barY;
-    private float invX, invY, invCell, invTabY, invTabH, invTop, invBottom;
-    private static final int INV_COLS = 9, INV_ROWS = 2;
+    private float invX, invY, invCell, invTabY, invTabH, invTop, invBottom, invLeft, invRight;
+    private static final int INV_COLS = 9;
     private int invTab;
+    /** Wood tab: -2 = species list, -1 = "Leaves & More", otherwise the species shown. */
+    private int woodView = -2;
+    private float invScroll, invContentH;
+    private int invPid = -1;
+    private float invDownX, invDownY, invLastY;
+    private boolean invMoved;
+    // Laid-out entries of the scrollable area (content coordinates).
+    private static final int E_BLOCK = 0, E_SPECIES = 1, E_HEADER = 2, E_BACK = 3;
+    private int nEntries;
+    private int[] eKind = new int[64], eValue = new int[64];
+    private float[] eX = new float[64], eY = new float[64], eW = new float[64], eH = new float[64];
+    private String[] eText = new String[64];
 
     // State
     private boolean invOpen;
@@ -56,7 +67,6 @@ final class HudView extends View {
         super(ctx);
         this.in = in;
         this.onMenu = onMenu;
-        icons = BlockIcons.get(ctx);
         dp = ctx.getResources().getDisplayMetrics().density;
         stroke.setStyle(Paint.Style.STROKE);
         text.setColor(0xFFFFFFFF);
@@ -92,14 +102,16 @@ final class HudView extends View {
         if (barX + slot * n > maxRight) barX = Math.max(8 * dp, maxRight - slot * n);
         barY = h - slot - 8 * dp;
 
-        invCell = Math.min(62 * dp, Math.min((w - 48 * dp) / INV_COLS, (h - 150 * dp) / INV_ROWS));
+        invCell = Math.min(62 * dp, (w - 48 * dp) / INV_COLS);
         invTabH = 38 * dp;
-        float panelH = 40 * dp + invTabH + 10 * dp + invCell * INV_ROWS + 12 * dp;
-        invTop = (h - panelH) / 2f;
-        invBottom = invTop + panelH;
+        invTop = 10 * dp;
+        invBottom = h - 10 * dp;
         invTabY = invTop + 40 * dp;
         invX = w / 2f - invCell * INV_COLS / 2f;
         invY = invTabY + invTabH + 10 * dp;
+        invLeft = invX - 12 * dp;
+        invRight = invX + invCell * INV_COLS + 12 * dp;
+        layoutEntries();
         menuR = 26 * dp;
         menuX = 46 * dp;
         menuY = 46 * dp;
@@ -168,12 +180,91 @@ final class HudView extends View {
         if (invOpen) drawInventory(c, w, h, now);
     }
 
+    // ------------------------------------------------------------------ block picker
+
+    private void addEntry(int kind, int value, String label, float x, float y, float w, float h) {
+        if (nEntries == eKind.length) {
+            int n = nEntries * 2;
+            eKind = java.util.Arrays.copyOf(eKind, n);
+            eValue = java.util.Arrays.copyOf(eValue, n);
+            eX = java.util.Arrays.copyOf(eX, n);
+            eY = java.util.Arrays.copyOf(eY, n);
+            eW = java.util.Arrays.copyOf(eW, n);
+            eH = java.util.Arrays.copyOf(eH, n);
+            eText = java.util.Arrays.copyOf(eText, n);
+        }
+        eKind[nEntries] = kind; eValue[nEntries] = value; eText[nEntries] = label;
+        eX[nEntries] = x; eY[nEntries] = y; eW[nEntries] = w; eH[nEntries] = h;
+        nEntries++;
+    }
+
+    /** Positions everything shown in the scrollable area for the current tab. */
+    private void layoutEntries() {
+        nEntries = 0;
+        float width = invCell * INV_COLS;
+        float y = 0;
+        if (invTab == Blocks.WOOD_TAB && woodView == -2) {
+            int cols = 3;
+            float cw = width / cols, ch = 42 * dp;
+            addEntry(E_SPECIES, -1, "Leaves & More", 0, y, cw, ch);
+            y += ch + 8 * dp;
+            int firstSoft = Wood.firstSoftwood();
+            for (int part = 0; part < 2; part++) {
+                addEntry(E_HEADER, 0, part == 0 ? "HARDWOODS" : "SOFTWOODS (CONIFER)", 0, y, width, 26 * dp);
+                y += 28 * dp;
+                int from = part == 0 ? 0 : firstSoft, to = part == 0 ? firstSoft : Wood.ALL.length;
+                for (int i = from; i < to; i++) {
+                    int k = i - from;
+                    addEntry(E_SPECIES, i, Wood.ALL[i].name, (k % cols) * cw, y + (k / cols) * ch, cw, ch);
+                }
+                y += ((to - from + cols - 1) / cols) * ch + 10 * dp;
+            }
+        } else {
+            int[] list;
+            if (invTab == Blocks.WOOD_TAB) {
+                addEntry(E_BACK, 0, "\u2190  All woods", 0, y, width / 3, 40 * dp);
+                y += 48 * dp;
+                if (woodView == -1) {
+                    list = Blocks.CATEGORIES[Blocks.WOOD_TAB];
+                } else {
+                    list = new int[Blocks.PIECES];
+                    for (int k = 0; k < Blocks.PIECES; k++) list[k] = Blocks.wood(woodView, k);
+                }
+            } else {
+                list = Blocks.CATEGORIES[invTab];
+            }
+            for (int i = 0; i < list.length; i++) {
+                addEntry(E_BLOCK, list[i], null, (i % INV_COLS) * invCell, y + (i / INV_COLS) * invCell, invCell, invCell);
+            }
+            y += ((list.length + INV_COLS - 1) / INV_COLS) * invCell;
+            if (invTab == Blocks.WOOD_TAB && woodView >= 0) {
+                Wood wd = Wood.ALL[woodView];
+                String label = wd.name + (wd.name.endsWith(wd.family) ? "" : "  \u00b7  " + wd.family + " family")
+                        + "  \u00b7  " + (wd.softwood ? "softwood" : "hardwood")
+                        + "   (log, planks, stairs, slab, door, trapdoor)";
+                addEntry(E_HEADER, 0, label, 0, y + 4 * dp, width, 26 * dp);
+                y += 34 * dp;
+            }
+        }
+        invContentH = y;
+        clampScroll();
+    }
+
+    private float viewH() {
+        return invBottom - 10 * dp - invY;
+    }
+
+    private void clampScroll() {
+        float max = Math.max(0, invContentH - viewH());
+        if (invScroll > max) invScroll = max;
+        if (invScroll < 0) invScroll = 0;
+    }
+
     private void drawInventory(Canvas c, int w, int h, long now) {
         fill.setStyle(Paint.Style.FILL);
         fill.setColor(0xAA000000);
         c.drawRect(0, 0, w, h, fill);
-        float left = invX - 12 * dp, right = invX + invCell * INV_COLS + 12 * dp;
-        rect.set(left, invTop, right, invBottom);
+        rect.set(invLeft, invTop, invRight, invBottom);
         fill.setColor(0xEE2A2F3A);
         c.drawRoundRect(rect, 12 * dp, 12 * dp, fill);
         text.setTextSize(17 * dp);
@@ -182,29 +273,78 @@ final class HudView extends View {
 
         // Tabs
         int nt = Blocks.CATEGORY_NAMES.length;
-        float tw = (right - left - 16 * dp) / nt;
+        float tw = (invRight - invLeft - 16 * dp) / nt;
         text.setTextSize(Math.min(14 * dp, tw * 0.16f));
         for (int t = 0; t < nt; t++) {
-            float x = left + 8 * dp + t * tw;
+            float x = invLeft + 8 * dp + t * tw;
             rect.set(x + 2 * dp, invTabY, x + tw - 2 * dp, invTabY + invTabH);
             fill.setColor(t == invTab ? 0xFF4CAF50 : 0xFF3A4150);
             c.drawRoundRect(rect, 8 * dp, 8 * dp, fill);
             c.drawText(Blocks.CATEGORY_NAMES[t], rect.centerX(), rect.centerY() + text.getTextSize() * 0.35f, text);
         }
 
-        // Blocks of the current tab
-        int[] cat = Blocks.CATEGORIES[invTab];
-        for (int i = 0; i < cat.length; i++) {
-            float x = invX + (i % INV_COLS) * invCell, y = invY + (i / INV_COLS) * invCell;
-            rect.set(x + 3 * dp, y + 3 * dp, x + invCell - 3 * dp, y + invCell - 3 * dp);
-            fill.setColor(in.hotbar[in.selected] == cat[i] ? 0xFF56607A : 0xFF3A4150);
-            c.drawRoundRect(rect, 6 * dp, 6 * dp, fill);
-            drawIcon(c, cat[i], rect);
+        // Scrollable content
+        float top = invY, bottom = invY + viewH();
+        c.save();
+        c.clipRect(invLeft, top, invRight, bottom);
+        int sel = in.hotbar[in.selected];
+        for (int i = 0; i < nEntries; i++) {
+            float x = invX + eX[i], y = top + eY[i] - invScroll;
+            if (y > bottom || y + eH[i] < top) continue;
+            switch (eKind[i]) {
+                case E_BLOCK:
+                    rect.set(x + 3 * dp, y + 3 * dp, x + eW[i] - 3 * dp, y + eH[i] - 3 * dp);
+                    fill.setColor(sel == eValue[i] ? 0xFF56607A : 0xFF3A4150);
+                    c.drawRoundRect(rect, 6 * dp, 6 * dp, fill);
+                    drawIcon(c, eValue[i], rect);
+                    break;
+                case E_HEADER:
+                    text.setTextSize(13 * dp);
+                    text.setTextAlign(Paint.Align.LEFT);
+                    text.setColor(0xFFAEB7C8);
+                    c.drawText(eText[i], x + 4 * dp, y + 18 * dp, text);
+                    text.setColor(0xFFFFFFFF);
+                    text.setTextAlign(Paint.Align.CENTER);
+                    break;
+                default: { // species chip or back button
+                    rect.set(x + 3 * dp, y + 3 * dp, x + eW[i] - 3 * dp, y + eH[i] - 3 * dp);
+                    boolean current = eKind[i] == E_SPECIES && Blocks.species(sel) == eValue[i] && eValue[i] >= 0;
+                    fill.setColor(eKind[i] == E_BACK ? 0xFF505868 : current ? 0xFF56607A : 0xFF3A4150);
+                    c.drawRoundRect(rect, 8 * dp, 8 * dp, fill);
+                    float tx = rect.left + 10 * dp;
+                    if (eKind[i] == E_SPECIES) {
+                        int swatch = eValue[i] >= 0 ? Blocks.wood(eValue[i], Blocks.W_LOG) : Blocks.LEAVES;
+                        float is = rect.height() - 6 * dp;
+                        rect2.set(rect.left + 4 * dp, rect.top + 3 * dp, rect.left + 4 * dp + is, rect.top + 3 * dp + is);
+                        Bitmap b = BlockIcons.icon(getContext(), swatch);
+                        if (b != null) c.drawBitmap(b, null, rect2, iconPaint);
+                        tx = rect2.right + 6 * dp;
+                    }
+                    text.setTextSize(13.5f * dp);
+                    text.setTextAlign(Paint.Align.LEFT);
+                    String label = eText[i];
+                    float maxW = rect.right - tx - 6 * dp;
+                    while (label.length() > 3 && text.measureText(label) > maxW) label = label.substring(0, label.length() - 2) + "\u2026";
+                    c.drawText(label, tx, rect.centerY() + 5 * dp, text);
+                    text.setTextAlign(Paint.Align.CENTER);
+                }
+            }
+        }
+        c.restore();
+
+        // Scroll bar
+        if (invContentH > viewH()) {
+            float vh = viewH();
+            float barH = Math.max(24 * dp, vh * vh / invContentH);
+            float barY = top + (vh - barH) * (invScroll / (invContentH - vh));
+            fill.setColor(0x66FFFFFF);
+            rect.set(invRight - 7 * dp, barY, invRight - 3 * dp, barY + barH);
+            c.drawRoundRect(rect, 2 * dp, 2 * dp, fill);
         }
     }
 
     private void drawIcon(Canvas c, int block, RectF r) {
-        Bitmap b = icons[block];
+        Bitmap b = BlockIcons.icon(getContext(), block);
         if (b == null) return;
         float pad = r.width() * 0.1f;
         rect2.set(r.left + pad, r.top + pad, r.right - pad, r.bottom - pad);
@@ -276,13 +416,15 @@ final class HudView extends View {
 
     private void pointerDown(int id, float x, float y) {
         if (invOpen) {
-            inventoryTap(x, y);
+            invDown(id, x, y);
             return;
         }
         int s = hotbarSlotAt(x, y);
         if (s >= 0) {
             if (s == SLOTS) {
                 invOpen = true;
+                invPid = -1;
+                layoutEntries();
                 releaseMovement();
             } else {
                 in.selected = s;
@@ -323,6 +465,10 @@ final class HudView extends View {
     }
 
     private void pointerMove(int id, float x, float y) {
+        if (invOpen) {
+            invMove(id, x, y);
+            return;
+        }
         if (id == joyId) {
             float dx = x - joyCx, dy = y - joyCy;
             float len = (float) Math.sqrt(dx * dx + dy * dy);
@@ -345,6 +491,11 @@ final class HudView extends View {
     }
 
     private void pointerUp(int id, boolean cancel) {
+        if (id == invPid) {
+            if (cancel) invPid = -1;
+            else invUp(id);
+            return;
+        }
         if (id == joyId) {
             joyId = -1;
             in.moveX = 0;
@@ -372,31 +523,71 @@ final class HudView extends View {
         removeCallbacks(holdBreak);
     }
 
-    private void inventoryTap(float x, float y) {
-        float left = invX - 12 * dp, right = invX + invCell * INV_COLS + 12 * dp;
-        if (x < left || x > right || y < invTop || y > invBottom) {
+    private void invDown(int id, float x, float y) {
+        if (x < invLeft || x > invRight || y < invTop || y > invBottom) {
             invOpen = false; // tapped outside the panel
             return;
         }
         if (y >= invTabY && y <= invTabY + invTabH) {
             int nt = Blocks.CATEGORY_NAMES.length;
-            float tw = (right - left - 16 * dp) / nt;
-            int t = (int) Math.floor((x - left - 8 * dp) / tw);
+            float tw = (invRight - invLeft - 16 * dp) / nt;
+            int t = (int) Math.floor((x - invLeft - 8 * dp) / tw);
             if (t >= 0 && t < nt) {
+                if (t == invTab && t == Blocks.WOOD_TAB) woodView = -2; // tap Wood again: back to the list
                 invTab = t;
+                invScroll = 0;
+                layoutEntries();
                 haptic();
             }
             return;
         }
-        int col = (int) Math.floor((x - invX) / invCell), row = (int) Math.floor((y - invY) / invCell);
-        if (x >= invX && col < INV_COLS && y >= invY && row >= 0 && row < INV_ROWS) {
-            int[] cat = Blocks.CATEGORIES[invTab];
-            int i = row * INV_COLS + col;
-            if (i < cat.length) {
-                in.hotbar[in.selected] = cat[i];
-                showToast(Blocks.NAMES[cat[i]], 1500);
-                haptic();
-                invOpen = false;
+        if (y >= invY && invPid == -1) {
+            invPid = id;
+            invDownX = x;
+            invDownY = invLastY = y;
+            invMoved = false;
+        }
+    }
+
+    private void invMove(int id, float x, float y) {
+        if (id != invPid) return;
+        if (Math.abs(y - invDownY) > 10 * dp) invMoved = true;
+        if (invMoved) {
+            invScroll -= y - invLastY;
+            clampScroll();
+        }
+        invLastY = y;
+    }
+
+    private void invUp(int id) {
+        if (id != invPid) return;
+        invPid = -1;
+        if (invMoved) return;
+        float cx = invDownX - invX, cy = invDownY - invY + invScroll;
+        if (invDownY > invY + viewH()) return;
+        for (int i = 0; i < nEntries; i++) {
+            if (cx < eX[i] || cx > eX[i] + eW[i] || cy < eY[i] || cy > eY[i] + eH[i]) continue;
+            switch (eKind[i]) {
+                case E_BLOCK:
+                    in.hotbar[in.selected] = eValue[i];
+                    showToast(Blocks.NAMES[eValue[i]], 1500);
+                    haptic();
+                    invOpen = false;
+                    return;
+                case E_SPECIES:
+                    woodView = eValue[i];
+                    invScroll = 0;
+                    layoutEntries();
+                    haptic();
+                    return;
+                case E_BACK:
+                    woodView = -2;
+                    invScroll = 0;
+                    layoutEntries();
+                    haptic();
+                    return;
+                default:
+                    return;
             }
         }
     }

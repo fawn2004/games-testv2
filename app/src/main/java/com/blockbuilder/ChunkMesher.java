@@ -14,7 +14,9 @@ final class ChunkMesher {
     };
     static final float[] SHADE = {0.8f, 0.8f, 1.0f, 0.55f, 0.68f, 0.68f};
     static final float[] AO = {0.5f, 0.68f, 0.84f, 1.0f};
-    private static final float T = 1f / 16f, E = 0.0004f;
+    private static final int PR = TextureAtlas.PER_ROW;
+    private static final float T = 1f / PR, E = 0.0002f;
+    private final float[] boxes = new float[6 * 4];
 
     private final int[] ao = new int[4];
     private final float[] vx = new float[4], vy = new float[4], vz = new float[4],
@@ -41,6 +43,10 @@ final class ChunkMesher {
                 for (int y = 0; y < World.SY; y++) {
                     int b = w.blocks[World.idx(x, y, z)];
                     if (b == Blocks.AIR) continue;
+                    if (Blocks.shape(b) != Shapes.CUBE) {
+                        shaped(w, x, y, z, b, w.meta[World.idx(x, y, z)], solid);
+                        continue;
+                    }
                     boolean isWater = b == Blocks.WATER;
                     boolean glow = Blocks.isEmissive(b);
                     FloatBuilder out = isWater ? water : solid;
@@ -51,7 +57,7 @@ final class ChunkMesher {
                         int nx = x + d[0], ny = y + d[1], nz = z + d[2];
                         if (!shouldEmit(b, w.get(nx, ny, nz))) continue;
                         int tile = Blocks.tile(b, f);
-                        float u0 = (tile & 15) * T + E, v0 = (tile >> 4) * T + E, us = T - 2 * E;
+                        float u0 = (tile % PR) * T + E, v0 = (tile / PR) * T + E, us = T - 2 * E;
                         int na = f >> 1, a1 = (na + 1) % 3, a2 = (na + 2) % 3;
                         int[][] vs = VERTS[f];
                         for (int i = 0; i < 4; i++) {
@@ -92,6 +98,49 @@ final class ChunkMesher {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** Stairs, slabs, doors and trapdoors: each box face, culled only against full opaque neighbours. */
+    private void shaped(World w, int x, int y, int z, int b, int meta, FloatBuilder out) {
+        int n = Shapes.boxes(b, meta, boxes);
+        boolean door = Blocks.shape(b) == Shapes.DOOR;
+        boolean upper = (meta & Shapes.UPPER) != 0;
+        for (int k = 0; k < n; k++) {
+            int o = k * 6;
+            float x0 = boxes[o], y0 = boxes[o + 1], z0 = boxes[o + 2];
+            float x1 = boxes[o + 3], y1 = boxes[o + 4], z1 = boxes[o + 5];
+            for (int f = 0; f < 6; f++) {
+                boolean onEdge = (f == 0 && x1 >= 1) || (f == 1 && x0 <= 0) || (f == 2 && y1 >= 1)
+                        || (f == 3 && y0 <= 0) || (f == 4 && z1 >= 1) || (f == 5 && z0 <= 0);
+                if (onEdge) {
+                    int[] d = DIR[f];
+                    if (Blocks.isOpaque(w.get(x + d[0], y + d[1], z + d[2]))) continue;
+                }
+                int tile = door ? Blocks.doorTile(b, upper) : Blocks.tile(b, f);
+                float u0 = (tile % PR) * T + E, v0 = (tile / PR) * T + E, us = T - 2 * E;
+                int[][] vs = VERTS[f];
+                for (int i = 0; i < 4; i++) {
+                    int[] c = vs[i];
+                    float lx = c[0] == 1 ? x1 : x0, ly = c[1] == 1 ? y1 : y0, lz = c[2] == 1 ? z1 : z0;
+                    vx[i] = x + lx;
+                    vy[i] = y + ly;
+                    vz[i] = z + lz;
+                    float tu, tv;
+                    if (f == 2 || f == 3) {
+                        tu = lx; tv = lz;
+                    } else {
+                        tv = 1 - ly;
+                        tu = (f < 2) ? lz : lx;
+                    }
+                    vu[i] = u0 + tu * us;
+                    vv[i] = v0 + tv * us;
+                    vl[i] = SHADE[f];
+                }
+                out.ensure(36);
+                emit(out, 0); emit(out, 1); emit(out, 2);
+                emit(out, 0); emit(out, 2); emit(out, 3);
             }
         }
     }

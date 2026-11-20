@@ -55,7 +55,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private int tex;
     private final float[] proj = new float[16], view = new float[16], mvp = new float[16];
     private final float[] dir = new float[3];
-    private final int[] hit = new int[6];
+    private final int[] hit = new int[7];
+    private final float[] hitPos = new float[3];
+    private final float[] shapeBoxes = new float[6 * 4];
     private FloatBuffer upload;
     private final FloatBuffer lineBuf = ByteBuffer.allocateDirect(24 * 3 * 4)
             .order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -172,7 +174,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(aLight);
 
         // Selection outline
-        if (world.raycast(ex, ey, ez, dir[0], dir[1], dir[2], 6f, hit)) {
+        if (world.raycast(ex, ey, ez, dir[0], dir[1], dir[2], 6f, hit, hitPos)) {
             drawOutline(hit[0], hit[1], hit[2]);
         }
         GLES20.glDisable(GLES20.GL_BLEND);
@@ -203,20 +205,71 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private void processActions(float ex, float ey, float ez) {
         Integer a;
         while ((a = input.actions.poll()) != null) {
-            if (!world.raycast(ex, ey, ez, dir[0], dir[1], dir[2], 6f, hit)) continue;
+            if (!world.raycast(ex, ey, ez, dir[0], dir[1], dir[2], 6f, hit, hitPos)) continue;
+            int hx = hit[0], hy = hit[1], hz = hit[2];
+            int hb = world.get(hx, hy, hz), hm = world.getMeta(hx, hy, hz);
+            int hShape = Blocks.shape(hb);
             if (a == InputState.ACT_BREAK) {
-                if (world.get(hit[0], hit[1], hit[2]) != Blocks.BEDROCK) {
-                    world.set(hit[0], hit[1], hit[2], Blocks.AIR);
+                if (hb == Blocks.BEDROCK) continue;
+                world.set(hx, hy, hz, Blocks.AIR);
+                if (hShape == Shapes.DOOR) {   // remove the other half too
+                    int oy = (hm & Shapes.UPPER) != 0 ? hy - 1 : hy + 1;
+                    if (world.get(hx, oy, hz) == hb) world.set(hx, oy, hz, Blocks.AIR);
                 }
             } else if (a == InputState.ACT_PLACE) {
+                if (hShape == Shapes.DOOR || hShape == Shapes.TRAPDOOR) {
+                    toggle(hx, hy, hz, hb, hm);
+                    continue;
+                }
+                int b = input.selectedBlock();
+                int shape = Blocks.shape(b);
+                int face = hit[6];
+                // Two matching slabs make a full block of planks.
+                if (shape == Shapes.SLAB && hb == b) {
+                    boolean top = (hm & Shapes.TOP) != 0;
+                    if ((!top && face == 2) || (top && face == 3)) {
+                        world.set(hx, hy, hz, Blocks.planksOf(b));
+                        continue;
+                    }
+                }
                 int px = hit[3], py = hit[4], pz = hit[5];
                 if (!World.inside(px, py, pz)) continue;
                 int cur = world.get(px, py, pz);
-                if (cur != Blocks.AIR && cur != Blocks.WATER) continue;
-                int b = input.selectedBlock();
+                if (cur != Blocks.AIR && cur != Blocks.WATER) {
+                    // Fill the other half of a slab cell.
+                    if (shape == Shapes.SLAB && cur == b) {
+                        world.set(px, py, pz, Blocks.planksOf(b));
+                    }
+                    continue;
+                }
                 if (Blocks.isSolid(b) && player.intersects(px, py, pz)) continue;
-                world.set(px, py, pz, b);
+
+                int facing = Shapes.facingFromLook(dir[0], dir[2]);
+                boolean upperHalf = face == 3 || (face != 2 && hitPos[1] - (float) Math.floor(hitPos[1]) > 0.5f);
+                int meta = 0;
+                if (shape == Shapes.STAIRS || shape == Shapes.TRAPDOOR) {
+                    meta = facing | (upperHalf ? Shapes.TOP : 0);
+                } else if (shape == Shapes.SLAB) {
+                    meta = upperHalf ? Shapes.TOP : 0;
+                } else if (shape == Shapes.DOOR) {
+                    int above = world.get(px, py + 1, pz);
+                    if (!World.inside(px, py + 1, pz) || (above != Blocks.AIR && above != Blocks.WATER)) continue;
+                    if (player.intersects(px, py + 1, pz)) continue;
+                    world.set(px, py, pz, b, facing);
+                    world.set(px, py + 1, pz, b, facing | Shapes.UPPER);
+                    continue;
+                }
+                world.set(px, py, pz, b, meta);
             }
+        }
+    }
+
+    /** Opens or closes a door (both halves) or trapdoor. */
+    private void toggle(int x, int y, int z, int b, int m) {
+        world.set(x, y, z, b, m ^ Shapes.OPEN);
+        if (Blocks.shape(b) == Shapes.DOOR) {
+            int oy = (m & Shapes.UPPER) != 0 ? y - 1 : y + 1;
+            if (world.get(x, oy, z) == b) world.set(x, oy, z, b, world.getMeta(x, oy, z) ^ Shapes.OPEN);
         }
     }
 
@@ -266,7 +319,14 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     private void drawOutline(int x, int y, int z) {
         float e = 0.003f;
-        float x0 = x - e, y0 = y - e, z0 = z - e, x1 = x + 1 + e, y1 = y + 1 + e, z1 = z + 1 + e;
+        int n = Shapes.boxes(world.get(x, y, z), world.getMeta(x, y, z), shapeBoxes);
+        float bx0 = 1, by0 = 1, bz0 = 1, bx1 = 0, by1 = 0, bz1 = 0;
+        for (int k = 0; k < n; k++) {
+            int o = k * 6;
+            bx0 = Math.min(bx0, shapeBoxes[o]); by0 = Math.min(by0, shapeBoxes[o + 1]); bz0 = Math.min(bz0, shapeBoxes[o + 2]);
+            bx1 = Math.max(bx1, shapeBoxes[o + 3]); by1 = Math.max(by1, shapeBoxes[o + 4]); bz1 = Math.max(bz1, shapeBoxes[o + 5]);
+        }
+        float x0 = x + bx0 - e, y0 = y + by0 - e, z0 = z + bz0 - e, x1 = x + bx1 + e, y1 = y + by1 + e, z1 = z + bz1 + e;
         float[] v = {
                 x0, y0, z0, x1, y0, z0, x1, y0, z0, x1, y0, z1, x1, y0, z1, x0, y0, z1, x0, y0, z1, x0, y0, z0,
                 x0, y1, z0, x1, y1, z0, x1, y1, z0, x1, y1, z1, x1, y1, z1, x0, y1, z1, x0, y1, z1, x0, y1, z0,
