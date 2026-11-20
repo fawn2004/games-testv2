@@ -42,6 +42,7 @@ final class ChunkMesher {
                     int b = w.blocks[World.idx(x, y, z)];
                     if (b == Blocks.AIR) continue;
                     boolean isWater = b == Blocks.WATER;
+                    boolean glow = Blocks.isEmissive(b);
                     FloatBuilder out = isWater ? water : solid;
                     float waterTop = 1f;
                     if (isWater && w.get(x, y + 1, z) != Blocks.WATER) waterTop = 0.875f;
@@ -79,7 +80,7 @@ final class ChunkMesher {
                             }
                             vu[i] = u0 + tu * us;
                             vv[i] = v0 + tv * us;
-                            vl[i] = SHADE[f] * AO[ao[i]];
+                            vl[i] = glow ? 1.0f : SHADE[f] * AO[ao[i]];
                         }
                         out.ensure(36);
                         if (ao[0] + ao[2] >= ao[1] + ao[3]) {

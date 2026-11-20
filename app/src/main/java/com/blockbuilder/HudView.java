@@ -27,8 +27,9 @@ final class HudView extends View {
     private float menuX, menuY, menuR;
     private float jumpX, jumpY, jumpR, downX, downY, downR, modeX, modeY, modeR, flyX, flyY, flyR;
     private float slot, barX, barY;
-    private float invX, invY, invCell;
-    private static final int INV_COLS = 7;
+    private float invX, invY, invCell, invTabY, invTabH, invTop, invBottom;
+    private static final int INV_COLS = 9, INV_ROWS = 2;
+    private int invTab;
 
     // State
     private boolean invOpen;
@@ -91,10 +92,14 @@ final class HudView extends View {
         if (barX + slot * n > maxRight) barX = Math.max(8 * dp, maxRight - slot * n);
         barY = h - slot - 8 * dp;
 
-        invCell = Math.min(64 * dp, Math.min((w - 40 * dp) / INV_COLS, (h - 120 * dp) / 4f));
-        int rows = (Blocks.PLACEABLE.length + INV_COLS - 1) / INV_COLS;
+        invCell = Math.min(62 * dp, Math.min((w - 48 * dp) / INV_COLS, (h - 150 * dp) / INV_ROWS));
+        invTabH = 38 * dp;
+        float panelH = 40 * dp + invTabH + 10 * dp + invCell * INV_ROWS + 12 * dp;
+        invTop = (h - panelH) / 2f;
+        invBottom = invTop + panelH;
+        invTabY = invTop + 40 * dp;
         invX = w / 2f - invCell * INV_COLS / 2f;
-        invY = h / 2f - invCell * rows / 2f + 16 * dp;
+        invY = invTabY + invTabH + 10 * dp;
         menuR = 26 * dp;
         menuX = 46 * dp;
         menuY = 46 * dp;
@@ -167,19 +172,34 @@ final class HudView extends View {
         fill.setStyle(Paint.Style.FILL);
         fill.setColor(0xAA000000);
         c.drawRect(0, 0, w, h, fill);
-        int rows = (Blocks.PLACEABLE.length + INV_COLS - 1) / INV_COLS;
-        rect.set(invX - 12 * dp, invY - 44 * dp, invX + invCell * INV_COLS + 12 * dp,
-                invY + invCell * rows + 12 * dp);
+        float left = invX - 12 * dp, right = invX + invCell * INV_COLS + 12 * dp;
+        rect.set(left, invTop, right, invBottom);
         fill.setColor(0xEE2A2F3A);
         c.drawRoundRect(rect, 12 * dp, 12 * dp, fill);
-        text.setTextSize(18 * dp);
-        c.drawText("Choose a block for slot " + (in.selected + 1), w / 2f, invY - 16 * dp, text);
-        for (int i = 0; i < Blocks.PLACEABLE.length; i++) {
+        text.setTextSize(17 * dp);
+        c.drawText("Slot " + (in.selected + 1) + ": " + Blocks.NAMES[in.hotbar[in.selected]],
+                w / 2f, invTop + 27 * dp, text);
+
+        // Tabs
+        int nt = Blocks.CATEGORY_NAMES.length;
+        float tw = (right - left - 16 * dp) / nt;
+        text.setTextSize(Math.min(14 * dp, tw * 0.16f));
+        for (int t = 0; t < nt; t++) {
+            float x = left + 8 * dp + t * tw;
+            rect.set(x + 2 * dp, invTabY, x + tw - 2 * dp, invTabY + invTabH);
+            fill.setColor(t == invTab ? 0xFF4CAF50 : 0xFF3A4150);
+            c.drawRoundRect(rect, 8 * dp, 8 * dp, fill);
+            c.drawText(Blocks.CATEGORY_NAMES[t], rect.centerX(), rect.centerY() + text.getTextSize() * 0.35f, text);
+        }
+
+        // Blocks of the current tab
+        int[] cat = Blocks.CATEGORIES[invTab];
+        for (int i = 0; i < cat.length; i++) {
             float x = invX + (i % INV_COLS) * invCell, y = invY + (i / INV_COLS) * invCell;
             rect.set(x + 3 * dp, y + 3 * dp, x + invCell - 3 * dp, y + invCell - 3 * dp);
-            fill.setColor(in.hotbar[in.selected] == Blocks.PLACEABLE[i] ? 0xFF56607A : 0xFF3A4150);
+            fill.setColor(in.hotbar[in.selected] == cat[i] ? 0xFF56607A : 0xFF3A4150);
             c.drawRoundRect(rect, 6 * dp, 6 * dp, fill);
-            drawIcon(c, Blocks.PLACEABLE[i], rect);
+            drawIcon(c, cat[i], rect);
         }
     }
 
@@ -353,16 +373,32 @@ final class HudView extends View {
     }
 
     private void inventoryTap(float x, float y) {
-        int col = (int) Math.floor((x - invX) / invCell), row = (int) Math.floor((y - invY) / invCell);
-        if (x >= invX && col < INV_COLS && y >= invY && row >= 0) {
-            int i = row * INV_COLS + col;
-            if (i < Blocks.PLACEABLE.length) {
-                in.hotbar[in.selected] = Blocks.PLACEABLE[i];
-                showToast(Blocks.NAMES[Blocks.PLACEABLE[i]], 1500);
+        float left = invX - 12 * dp, right = invX + invCell * INV_COLS + 12 * dp;
+        if (x < left || x > right || y < invTop || y > invBottom) {
+            invOpen = false; // tapped outside the panel
+            return;
+        }
+        if (y >= invTabY && y <= invTabY + invTabH) {
+            int nt = Blocks.CATEGORY_NAMES.length;
+            float tw = (right - left - 16 * dp) / nt;
+            int t = (int) Math.floor((x - left - 8 * dp) / tw);
+            if (t >= 0 && t < nt) {
+                invTab = t;
                 haptic();
             }
+            return;
         }
-        invOpen = false;
+        int col = (int) Math.floor((x - invX) / invCell), row = (int) Math.floor((y - invY) / invCell);
+        if (x >= invX && col < INV_COLS && y >= invY && row >= 0 && row < INV_ROWS) {
+            int[] cat = Blocks.CATEGORIES[invTab];
+            int i = row * INV_COLS + col;
+            if (i < cat.length) {
+                in.hotbar[in.selected] = cat[i];
+                showToast(Blocks.NAMES[cat[i]], 1500);
+                haptic();
+                invOpen = false;
+            }
+        }
     }
 
     private void haptic() {

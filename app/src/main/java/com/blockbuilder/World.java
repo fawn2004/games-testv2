@@ -76,6 +76,7 @@ final class World {
         }
         Noise hills = new Noise(seed);
         Noise mountains = new Noise(seed * 31 + 7);
+        Noise floor = new Noise(seed * 17 + 3);
         Random rnd = new Random(seed);
         int[] height = new int[SX * SZ];
 
@@ -92,11 +93,16 @@ final class World {
 
                 boolean beach = h <= SEA + 1;
                 boolean rocky = h >= 40;
+                int bed = Blocks.SAND;
+                if (h < SEA - 1) {
+                    float f = floor.value(x / 9f, z / 9f);
+                    bed = f < 0.33f ? Blocks.GRAVEL : f > 0.7f ? Blocks.CLAY : Blocks.SAND;
+                }
                 for (int y = 0; y <= h; y++) {
                     int b;
                     if (y == 0) b = Blocks.BEDROCK;
-                    else if (y < h - 3) b = Blocks.STONE;
-                    else if (beach) b = Blocks.SAND;
+                    else if (y < h - 3) b = ore(y, rnd);
+                    else if (beach) b = bed;
                     else if (rocky) b = (y == h && h >= 45) ? Blocks.SNOW : Blocks.STONE;
                     else b = (y == h) ? Blocks.GRASS : Blocks.DIRT;
                     blocks[idx(x, y, z)] = (byte) b;
@@ -110,17 +116,31 @@ final class World {
             for (int z = 3; z < SZ - 3; z++) {
                 int h = height[x * SZ + z];
                 if (blocks[idx(x, h, z)] != Blocks.GRASS) continue;
-                if (rnd.nextFloat() > 0.012f) continue;
-                growTree(x, h + 1, z, rnd);
+                if (rnd.nextFloat() > 0.014f) continue;
+                float kind = rnd.nextFloat();
+                if (kind < 0.6f) growTree(x, h + 1, z, rnd, Blocks.LOG, Blocks.LEAVES, 0);
+                else if (kind < 0.82f) growTree(x, h + 1, z, rnd, Blocks.LIGHT_LOG, Blocks.LEAVES, 1);
+                else if (kind < 0.94f) growTree(x, h + 1, z, rnd, Blocks.LOG, Blocks.AUTUMN_LEAVES, 0);
+                else growTree(x, h + 1, z, rnd, Blocks.DARK_LOG, Blocks.BLOSSOM_LEAVES, 0);
             }
         }
         markAllDirty();
     }
 
-    private void growTree(int x, int y, int z, Random rnd) {
-        int th = 4 + rnd.nextInt(3);
+    /** Stone with the occasional ore; rarer ores only appear deeper down. */
+    private static int ore(int y, Random rnd) {
+        float p = rnd.nextFloat();
+        if (p < 0.012f) return Blocks.COAL_ORE;
+        if (p < 0.020f && y < 34) return Blocks.COPPER_ORE;
+        if (p < 0.024f && y < 20) return Blocks.GOLD_ORE;
+        if (p < 0.0258f && y < 12) return Blocks.CRYSTAL_ORE;
+        return Blocks.STONE;
+    }
+
+    private void growTree(int x, int y, int z, Random rnd, int log, int leaves, int extra) {
+        int th = 4 + rnd.nextInt(3) + extra;
         if (y + th + 1 >= SY) return;
-        for (int i = 0; i < th; i++) blocks[idx(x, y + i, z)] = (byte) Blocks.LOG;
+        for (int i = 0; i < th; i++) blocks[idx(x, y + i, z)] = (byte) log;
         for (int ly = y + th - 3; ly <= y + th; ly++) {
             int r = (ly >= y + th - 1) ? 1 : 2;
             for (int dx = -r; dx <= r; dx++) {
@@ -129,7 +149,7 @@ final class World {
                     if (corner && (ly == y + th || rnd.nextBoolean())) continue;
                     int bx = x + dx, bz = z + dz;
                     if (!inside(bx, ly, bz)) continue;
-                    if (blocks[idx(bx, ly, bz)] == Blocks.AIR) blocks[idx(bx, ly, bz)] = (byte) Blocks.LEAVES;
+                    if (blocks[idx(bx, ly, bz)] == Blocks.AIR) blocks[idx(bx, ly, bz)] = (byte) leaves;
                 }
             }
         }
