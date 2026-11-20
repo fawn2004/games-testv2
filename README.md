@@ -19,10 +19,15 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
   Portland Stone, Travertine, Gneiss, Onyx and Tufa), each with its own block, stairs and slab
 - Stairs and slabs face the way you look and go upside-down / on top when you tap the upper half of a
   block; doors and trapdoors open and close when tapped in Build mode; two slabs merge into planks
+- Lush worlds: winding rivers with cobble beds and earthy banks, grass tufts, ferns, bushes,
+  wildflowers, golden wheat fields, forest floor and leaf litter under trees, hanging vines and seagrass
+- A Plants tab with 13 plants and ground covers (moss carpet, leaf litter, moss block)
 - Worlds generate ores underground, gravel and clay lake beds, and four kinds of trees
-- Realistic lighting: warm directional sunlight with cast shadows (soft through leaves), cool sky
+- Golden-hour lighting: warm, low directional sunlight with cast shadows (soft through leaves), cool sky
   light, ambient occlusion, filmic tone mapping, a gradient sky with a sun, and atmospheric haze
-- Water with animated ripples, sky reflections (Fresnel) and sun glints; murky underwater view
+- Clear water with animated ripples, sky reflections (Fresnel), sun glints and moving caustics on the
+  riverbed; murky underwater view
+- Leaves and plants sway in the wind
 - Mipmapped textures (no shimmering in the distance) and natural colour variation in plants
 - Walking with auto-jump, swimming, and a fly mode
 - Worlds are saved automatically when you go back to the menu or leave the app

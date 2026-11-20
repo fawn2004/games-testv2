@@ -24,7 +24,16 @@ final class Blocks {
             PIECES = 6;
     static final String[] PIECE_NAMES = {"Log", "Planks", "Stairs", "Slab", "Door", "Trapdoor"};
     static final int FIRST_STONE = FIRST_WOOD + Wood.ALL.length * PIECES;
-    static final int COUNT = FIRST_STONE + Stone.newCount() + Stone.ALL.length * 2;
+    /** Added in 1.7: plants, ground cover and forest-floor blocks (ids are permanent). */
+    static final int FIRST_EXTRA = 414;
+    static final int GRASS_TUFT = 414, FERN = 415, BUSH = 416, RED_FLOWER = 417, YELLOW_FLOWER = 418,
+            BLUE_FLOWER = 419, WHITE_FLOWER = 420, WHEAT = 421, VINES = 422, SEAGRASS = 423,
+            MOSS_CARPET = 424, LEAF_LITTER = 425, COARSE_DIRT = 426, FOREST_FLOOR = 427, MOSS_BLOCK = 428;
+    static final int COUNT = 429;
+    static final int T_GRASS_TUFT = 384, T_FERN = 385, T_BUSH = 386, T_RED_FLOWER = 387,
+            T_YELLOW_FLOWER = 388, T_BLUE_FLOWER = 389, T_WHITE_FLOWER = 390, T_WHEAT = 391,
+            T_VINES = 392, T_SEAGRASS = 393, T_MOSS = 394, T_LEAF_LITTER = 395, T_COARSE_DIRT = 396,
+            T_FOREST_FLOOR = 397;
     /** Tiles for new stones start here (one tile each). */
     static final int T_STONE0 = 80 + Wood.ALL.length * 6 + 4; // right after the wood tiles
     /** Per stone: full block, stairs and slab ids. */
@@ -55,6 +64,9 @@ final class Blocks {
     private static final boolean[] OPAQUE = new boolean[COUNT];
     private static final boolean[] EMISSIVE = new boolean[COUNT];
     private static final int[] SHAPE = new int[COUNT];
+    private static final boolean[] SOLID_FLAG = new boolean[COUNT];
+    /** How much a block sways in the wind (0 = not at all). */
+    private static final float[] SWAY = new float[COUNT];
     /** For wood pieces: the species index, otherwise -1. */
     private static final int[] SPECIES = new int[COUNT];
     /** Full block that two slabs of this block merge into. */
@@ -169,6 +181,43 @@ final class Blocks {
             STONE_STAIRS[i] = stairs;
             STONE_SLAB[i] = slab;
         }
+        if (next != FIRST_EXTRA) throw new IllegalStateException("block ids moved: " + next);
+
+        plant(GRASS_TUFT, "Grass Tuft", T_GRASS_TUFT, 1f);
+        plant(FERN, "Fern", T_FERN, 1f);
+        plant(BUSH, "Bush", T_BUSH, 0.6f);
+        plant(RED_FLOWER, "Red Wildflower", T_RED_FLOWER, 1f);
+        plant(YELLOW_FLOWER, "Buttercups", T_YELLOW_FLOWER, 1f);
+        plant(BLUE_FLOWER, "Cornflower", T_BLUE_FLOWER, 1f);
+        plant(WHITE_FLOWER, "Daisies", T_WHITE_FLOWER, 1f);
+        plant(WHEAT, "Golden Wheat", T_WHEAT, 1f);
+        plant(VINES, "Hanging Vines", T_VINES, 1f);
+        plant(SEAGRASS, "Seagrass", T_SEAGRASS, 1f);
+        def(MOSS_CARPET, "Moss Carpet", T_MOSS, T_MOSS, T_MOSS, CUTOUT);
+        SHAPE[MOSS_CARPET] = Shapes.CARPET;
+        def(LEAF_LITTER, "Leaf Litter", T_LEAF_LITTER, T_LEAF_LITTER, T_LEAF_LITTER, CUTOUT);
+        SHAPE[LEAF_LITTER] = Shapes.CARPET;
+        def(COARSE_DIRT, "Coarse Dirt", T_COARSE_DIRT);
+        def(FOREST_FLOOR, "Forest Floor", T_FOREST_FLOOR, T_DIRT, T_DIRT, SOLID);
+        def(MOSS_BLOCK, "Moss Block", T_MOSS);
+
+        for (int b = 1; b < COUNT; b++) SOLID_FLAG[b] = b != WATER && SHAPE[b] != Shapes.CROSS;
+        SWAY[LEAVES] = SWAY[AUTUMN_LEAVES] = SWAY[BLOSSOM_LEAVES] = 0.25f;
+    }
+
+    private static void plant(int id, String name, int tile, float sway) {
+        def(id, name, tile, tile, tile, CUTOUT);
+        SHAPE[id] = Shapes.CROSS;
+        SWAY[id] = sway;
+    }
+
+    static float sway(int b) {
+        return SWAY[b];
+    }
+
+    /** Water, or a block that sits in water (seagrass). */
+    static boolean isWater(int b) {
+        return b == WATER || b == SEAGRASS;
     }
 
     /** Block id of a piece of a wood species. */
@@ -194,13 +243,15 @@ final class Blocks {
         return upper ? TILES[b][2] : TILES[b][1];
     }
 
-    static final int WOOD_TAB = 1, STONE_TAB = 2;
+    static final int WOOD_TAB = 2, STONE_TAB = 3;
 
     /** Inventory tabs. Wood and Stone are browsed by group instead (see GROUPS). */
-    static final String[] CATEGORY_NAMES = {"Natural", "Wood", "Stone", "Building", "Minerals", "Colors"};
+    static final String[] CATEGORY_NAMES = {"Natural", "Plants", "Wood", "Stone", "Building", "Minerals", "Colors"};
     static final int[][] CATEGORIES = {
-            {GRASS, DIRT, STONE, COBBLE, MOSSY_COBBLE, GRAVEL, SAND, RED_SAND, CLAY,
-                    MUD, SNOW, ICE, WATER},
+            {GRASS, DIRT, COARSE_DIRT, FOREST_FLOOR, STONE, COBBLE, MOSSY_COBBLE, GRAVEL, SAND,
+                    RED_SAND, CLAY, MUD, SNOW, ICE, WATER},
+            {GRASS_TUFT, FERN, BUSH, RED_FLOWER, YELLOW_FLOWER, BLUE_FLOWER, WHITE_FLOWER, WHEAT,
+                    VINES, SEAGRASS, MOSS_CARPET, LEAF_LITTER, MOSS_BLOCK},
             // Wood tab: these are shown under "Leaves & More"; species are listed separately.
             {LOG, PLANKS, LIGHT_LOG, LIGHT_PLANKS, DARK_LOG, DARK_PLANKS, LEAVES, AUTUMN_LEAVES,
                     BLOSSOM_LEAVES, HAY, CRATE, BOOKSHELF},
@@ -283,7 +334,7 @@ final class Blocks {
 
     /** Blocks the player collides with. */
     static boolean isSolid(int b) {
-        return b != AIR && b != WATER;
+        return SOLID_FLAG[b];
     }
 
     private Blocks() {

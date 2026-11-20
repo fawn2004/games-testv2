@@ -17,7 +17,7 @@ final class World {
     /** Highest y that has ever held a non-air block (shadow rays stop above it). */
     int maxHeight = SY - 1;
     /** Direction toward the sun, per block climbed (x and z drift per +1 y). */
-    static final float SUN_DX = 0.55f, SUN_DZ = 0.3f;
+    static final float SUN_DX = 0.9f, SUN_DZ = 0.45f; // late-afternoon sun: long, warm shadows
     /** Longest shadow, in blocks of height. */
     static final int SHADOW_STEPS = 32;
     long seed;
@@ -73,9 +73,11 @@ final class World {
         if (b == Blocks.AIR) return 1f;
         if (Blocks.isOpaque(b)) return 0f;
         if (b == Blocks.LEAVES || b == Blocks.AUTUMN_LEAVES || b == Blocks.BLOSSOM_LEAVES) return 0.55f;
-        if (b == Blocks.WATER) return 0.8f;
+        if (Blocks.isWater(b)) return 0.8f;
         if (b == Blocks.GLASS) return 0.92f;
         int shape = Blocks.shape(b);
+        if (shape == Shapes.CROSS) return 0.85f;
+        if (shape == Shapes.CARPET) return 1f;
         if (shape == Shapes.SLAB || shape == Shapes.STAIRS) return 0.35f;
         return 0.6f; // doors, trapdoors
     }
@@ -137,6 +139,7 @@ final class World {
         Noise hills = new Noise(seed);
         Noise mountains = new Noise(seed * 31 + 7);
         Noise floor = new Noise(seed * 17 + 3);
+        Noise river = new Noise(seed * 101 + 13);
         Random rnd = new Random(seed);
         int[] height = new int[SX * SZ];
 
@@ -149,19 +152,36 @@ final class World {
                 int h = (int) (12 + h1 * 18 + mount * 30);
                 if (h < 3) h = 3;
                 if (h > SY - 8) h = SY - 8;
+
+                // Winding rivers: a channel along a noise contour, with earthy banks.
+                boolean channel = false, bank = false;
+                float rd = Math.abs(river.fbm(x / 80f, z / 80f, 3) - 0.5f);
+                if (rd < 0.06f && h >= SEA - 1) {
+                    float t = rd / 0.06f;
+                    if (t < 0.45f) {
+                        h = Math.min(h, SEA - 2 - (int) ((0.45f - t) / 0.45f * 2.5f));
+                        channel = true;
+                    } else {
+                        h = Math.min(h, SEA + (int) ((t - 0.45f) / 0.55f * 4f));
+                        bank = true;
+                    }
+                }
                 height[x * SZ + z] = h;
 
-                boolean beach = h <= SEA + 1;
+                boolean beach = h <= SEA + 1 && !bank;
                 boolean rocky = h >= 40;
+                float f = floor.value(x / 9f, z / 9f);
                 int bed = Blocks.SAND;
-                if (h < SEA - 1) {
-                    float f = floor.value(x / 9f, z / 9f);
-                    bed = f < 0.33f ? Blocks.GRAVEL : f > 0.7f ? Blocks.CLAY : Blocks.SAND;
-                }
+                if (channel) bed = f < 0.4f ? Blocks.COBBLE : f < 0.7f ? Blocks.GRAVEL : Blocks.MOSSY_COBBLE;
+                else if (h < SEA - 1) bed = f < 0.33f ? Blocks.GRAVEL : f > 0.7f ? Blocks.CLAY : Blocks.SAND;
+                int bankTop = f < 0.35f ? Blocks.FOREST_FLOOR : f < 0.55f ? Blocks.COARSE_DIRT : Blocks.GRASS;
                 for (int y = 0; y <= h; y++) {
                     int b;
                     if (y == 0) b = Blocks.BEDROCK;
                     else if (y < h - 3) b = ore(y, rnd);
+                    else if (channel) b = y >= h - 1 ? bed : Blocks.STONE;
+                    else if (bank && y == h) b = bankTop;
+                    else if (bank) b = Blocks.DIRT;
                     else if (beach) b = bed;
                     else if (rocky) b = (y == h && h >= 45) ? Blocks.SNOW : Blocks.STONE;
                     else b = (y == h) ? Blocks.GRASS : Blocks.DIRT;
@@ -184,8 +204,72 @@ final class World {
                 else growTree(x, h + 1, z, rnd, Blocks.DARK_LOG, Blocks.BLOSSOM_LEAVES, 0);
             }
         }
+        decorate(height, rnd, seed);
         recomputeMaxHeight();
         markAllDirty();
+    }
+
+    /** Ground cover: grass, ferns, flowers, wheat fields, forest floor, vines and seagrass. */
+    private void decorate(int[] height, Random rnd, long seed) {
+        Noise fields = new Noise(seed * 7 + 5), flowers = new Noise(seed * 13 + 11);
+        for (int x = 0; x < SX; x++) {
+            for (int z = 0; z < SZ; z++) {
+                int h = height[x * SZ + z];
+                if (h + 2 >= SY) continue;
+                int top = blocks[idx(x, h, z)];
+                int above = blocks[idx(x, h + 1, z)];
+                if (above == Blocks.WATER) {
+                    // Seagrass on the bed of water at least two deep.
+                    if (h + 2 <= SEA && rnd.nextFloat() < 0.3f) blocks[idx(x, h + 1, z)] = (char) Blocks.SEAGRASS;
+                    continue;
+                }
+                if (above != Blocks.AIR) continue;
+                boolean shaded = false;
+                for (int y = h + 2; y < Math.min(SY, h + 10); y++) {
+                    int b = blocks[idx(x, y, z)];
+                    if (b == Blocks.LEAVES || b == Blocks.AUTUMN_LEAVES || b == Blocks.BLOSSOM_LEAVES) { shaded = true; break; }
+                }
+                float r = rnd.nextFloat();
+                if (top == Blocks.GRASS && shaded) {
+                    // Forest floor under the trees.
+                    if (r < 0.35f) blocks[idx(x, h, z)] = (char) Blocks.FOREST_FLOOR;
+                    float q = rnd.nextFloat();
+                    int plant = q < 0.2f ? Blocks.LEAF_LITTER : q < 0.28f ? Blocks.MOSS_CARPET
+                            : q < 0.4f ? Blocks.FERN : q < 0.55f ? Blocks.GRASS_TUFT : q < 0.6f ? Blocks.BUSH : 0;
+                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
+                } else if (top == Blocks.GRASS) {
+                    int plant = 0;
+                    if (fields.value(x / 14f, z / 14f) > 0.74f) {
+                        if (r < 0.85f) plant = Blocks.WHEAT;
+                    } else if (flowers.value(x / 9f, z / 9f) > 0.68f && r < 0.45f) {
+                        float k = flowers.value(x / 23f + 50, z / 23f);
+                        plant = k < 0.3f ? Blocks.RED_FLOWER : k < 0.5f ? Blocks.YELLOW_FLOWER
+                                : k < 0.7f ? Blocks.WHITE_FLOWER : Blocks.BLUE_FLOWER;
+                    } else if (r < 0.3f) plant = Blocks.GRASS_TUFT;
+                    else if (r < 0.33f) plant = Blocks.FERN;
+                    else if (r < 0.345f) plant = Blocks.BUSH;
+                    else if (r < 0.355f) plant = Blocks.RED_FLOWER + rnd.nextInt(4);
+                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
+                } else if (top == Blocks.FOREST_FLOOR || top == Blocks.COARSE_DIRT) {
+                    int plant = r < 0.12f ? Blocks.GRASS_TUFT : r < 0.17f ? Blocks.FERN
+                            : r < 0.3f ? Blocks.LEAF_LITTER : r < 0.36f ? Blocks.MOSS_CARPET
+                            : r < 0.39f ? Blocks.RED_FLOWER + rnd.nextInt(2) : 0;
+                    if (plant != 0) blocks[idx(x, h + 1, z)] = (char) plant;
+                }
+            }
+        }
+        // Vines hanging from the undersides of leaves.
+        for (int x = 0; x < SX; x++)
+            for (int z = 0; z < SZ; z++)
+                for (int y = 2; y < SY; y++) {
+                    int b = blocks[idx(x, y, z)];
+                    if (b != Blocks.LEAVES && b != Blocks.AUTUMN_LEAVES) continue;
+                    if (blocks[idx(x, y - 1, z)] != Blocks.AIR || rnd.nextFloat() > 0.12f) continue;
+                    int len = 1 + rnd.nextInt(3);
+                    for (int k = 1; k <= len && y - k > 0 && blocks[idx(x, y - k, z)] == Blocks.AIR
+                            && blocks[idx(x, y - k - 1, z)] == Blocks.AIR; k++)
+                        blocks[idx(x, y - k, z)] = (char) Blocks.VINES;
+                }
     }
 
     /** Stone with the occasional ore; rarer ores only appear deeper down. */

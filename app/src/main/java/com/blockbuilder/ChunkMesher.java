@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /**
  * Turns a 16x16 column of the world into triangle lists. Each vertex is
- * x, y, z, u, v, r, g, b where rgb is baked lighting in linear units (may exceed 1):
+ * x, y, z, u, v, r, g, b, flags where rgb is baked lighting in linear units (may exceed 1):
  * warm direct sun where the sun can reach, cool sky light reduced under cover,
  * ambient occlusion in corners, and a little natural colour variation.
  */
@@ -27,8 +27,8 @@ final class ChunkMesher {
         float l = (float) Math.sqrt(World.SUN_DX * World.SUN_DX + 1 + World.SUN_DZ * World.SUN_DZ);
         SUN_X = World.SUN_DX / l; SUN_Y = 1 / l; SUN_Z = World.SUN_DZ / l;
     }
-    private static final float SUN_R = 1.75f, SUN_G = 1.55f, SUN_B = 1.22f;
-    private static final float SKY_R = 0.25f, SKY_G = 0.33f, SKY_B = 0.50f;
+    private static final float SUN_R = 1.95f, SUN_G = 1.55f, SUN_B = 1.05f; // golden afternoon
+    private static final float SKY_R = 0.24f, SKY_G = 0.32f, SKY_B = 0.50f;
     private static final float BOUNCE_R = 0.10f, BOUNCE_G = 0.10f, BOUNCE_B = 0.08f;
     private static final float MIN_R = 0.025f, MIN_G = 0.028f, MIN_B = 0.036f;
     /** Sun intensity on each face direction (n . sun). */
@@ -48,7 +48,8 @@ final class ChunkMesher {
 
     private final int[] ao = new int[4];
     private final float[] vx = new float[4], vy = new float[4], vz = new float[4],
-            vu = new float[4], vv = new float[4], vr = new float[4], vg = new float[4], vb = new float[4];
+            vu = new float[4], vv = new float[4], vr = new float[4], vg = new float[4], vb = new float[4],
+            vf = new float[4];
 
     // Per-chunk caches of sun and sky visibility for cells around the chunk (with a 1-block margin).
     private static final int MW = World.CS + 2;
@@ -62,7 +63,7 @@ final class ChunkMesher {
     private static boolean shouldEmit(int b, int n) {
         if (n == Blocks.AIR) return true;
         if (Blocks.isOpaque(n)) return false;
-        if (b == Blocks.WATER) return n != Blocks.WATER;
+        if (b == Blocks.WATER) return !Blocks.isWater(n);
         if (b == Blocks.GLASS) return n != Blocks.GLASS;
         return true; // opaque or leaves next to glass / leaves / water
     }
@@ -123,7 +124,12 @@ final class ChunkMesher {
                 for (int y = 0; y < World.SY; y++) {
                     int b = w.blocks[World.idx(x, y, z)];
                     if (b == Blocks.AIR) continue;
-                    if (Blocks.shape(b) != Shapes.CUBE) {
+                    int shape = Blocks.shape(b);
+                    if (shape == Shapes.CROSS) {
+                        cross(x, y, z, b, solid, tint);
+                        if (b != Blocks.SEAGRASS) continue;
+                        b = Blocks.WATER; // seagrass stands in water: mesh the water too
+                    } else if (shape != Shapes.CUBE) {
                         shaped(x, y, z, b, w.meta[World.idx(x, y, z)], solid);
                         continue;
                     }
@@ -133,11 +139,14 @@ final class ChunkMesher {
                     float jitter = 0.97f + 0.06f * hash(x, y, z);
                     FloatBuilder out = isWater ? water : solid;
                     float waterTop = 1f;
-                    if (isWater && w.get(x, y + 1, z) != Blocks.WATER) waterTop = 0.875f;
+                    if (isWater && !Blocks.isWater(w.get(x, y + 1, z))) waterTop = 0.875f;
+                    float sway = Blocks.sway(b);
                     for (int f = 0; f < 6; f++) {
                         int[] d = DIR[f];
                         int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-                        if (!shouldEmit(b, w.get(nx, ny, nz))) continue;
+                        int nb = w.get(nx, ny, nz);
+                        if (!shouldEmit(b, nb)) continue;
+                        float flags = sway + (!isWater && Blocks.isWater(nb) ? 2f : 0f);
                         int tile = Blocks.tile(b, f);
                         float u0 = (tile % PR) * T + E, v0 = (tile / PR) * T + E, us = T - 2 * E;
                         int na = f >> 1, a1 = (na + 1) % 3, a2 = (na + 2) % 3;
@@ -184,6 +193,7 @@ final class ChunkMesher {
                             }
                             vu[i] = u0 + tu * us;
                             vv[i] = v0 + tv * us;
+                            vf[i] = flags;
                             if (isWater) {
                                 // Water shader reads: r = top face flag, g = sky, b = sun.
                                 vr[i] = f == 2 ? 1f : 0f;
@@ -198,7 +208,7 @@ final class ChunkMesher {
                                 }
                             }
                         }
-                        out.ensure(48);
+                        out.ensure(6 * FloatBuilder.STRIDE);
                         if (ao[0] + ao[2] >= ao[1] + ao[3]) {
                             emit(out, 0); emit(out, 1); emit(out, 2);
                             emit(out, 0); emit(out, 2); emit(out, 3);
@@ -258,10 +268,12 @@ final class ChunkMesher {
                 boolean onEdge = (f == 0 && x1 >= 1) || (f == 1 && x0 <= 0) || (f == 2 && y1 >= 1)
                         || (f == 3 && y0 <= 0) || (f == 4 && z1 >= 1) || (f == 5 && z0 <= 0);
                 float sunV = ownSun, skyV = ownSky;
+                float flags = 0f;
                 if (onEdge) {
                     int[] d = DIR[f];
                     int nb = w.get(x + d[0], y + d[1], z + d[2]);
                     if (Blocks.isOpaque(nb)) continue;
+                    if (Blocks.isWater(nb)) flags = 2f;
                     sunV = sun(x + d[0], y + d[1], z + d[2]);
                     skyV = sky(x + d[0], y + d[1], z + d[2]);
                 }
@@ -284,15 +296,59 @@ final class ChunkMesher {
                     vu[i] = u0 + tu * us;
                     vv[i] = v0 + tv * us;
                     light(i, f, 0.9f, sunV, skyV, jitter);
+                    vf[i] = flags;
                 }
-                out.ensure(48);
+                out.ensure(6 * FloatBuilder.STRIDE);
                 emit(out, 0); emit(out, 1); emit(out, 2);
                 emit(out, 0); emit(out, 2); emit(out, 3);
             }
         }
     }
 
+    /** Plants: two crossed quads, visible from both sides, nudged a little off-centre. */
+    private void cross(int x, int y, int z, int b, FloatBuilder out, float[] tint) {
+        int tile = Blocks.tile(b, 2);
+        float u0 = (tile % PR) * T + E, v0 = (tile / PR) * T + E, us = T - 2 * E;
+        float sunV = sun(x, y, z), skyV = sky(x, y, z);
+        float ox = 0, oz = 0;
+        if (b != Blocks.VINES) {
+            ox = (hash(x, y, z) - 0.5f) * 0.3f;
+            oz = (hash(z, x, y) - 0.5f) * 0.3f;
+        }
+        float swayTop = Blocks.sway(b), swayBottom = 0f;
+        if (b == Blocks.VINES) { swayBottom = swayTop; swayTop = 0.15f; }
+        float under = b == Blocks.SEAGRASS ? 2f : 0f;
+        boolean green = b == Blocks.GRASS_TUFT || b == Blocks.FERN || b == Blocks.BUSH || b == Blocks.VINES
+                || b == Blocks.SEAGRASS;
+        float a = 0.08f, c = 0.92f;
+        for (int q = 0; q < 2; q++) {
+            float xa = x + ox + a, za = z + oz + (q == 0 ? a : c);
+            float xb = x + ox + c, zb = z + oz + (q == 0 ? c : a);
+            // corners: 0 bottom-a, 1 top-a, 2 top-b, 3 bottom-b
+            vx[0] = xa; vy[0] = y;     vz[0] = za; vu[0] = u0;      vv[0] = v0 + us;
+            vx[1] = xa; vy[1] = y + 1; vz[1] = za; vu[1] = u0;      vv[1] = v0;
+            vx[2] = xb; vy[2] = y + 1; vz[2] = zb; vu[2] = u0 + us; vv[2] = v0;
+            vx[3] = xb; vy[3] = y;     vz[3] = zb; vu[3] = u0 + us; vv[3] = v0 + us;
+            for (int i = 0; i < 4; i++) {
+                boolean top = i == 1 || i == 2;
+                float ao = top ? 1f : 0.62f;
+                float ndl = 0.55f * sunV;
+                float sky = 0.8f * (0.25f + 0.75f * skyV);
+                vr[i] = SUN_R * ndl * ao + SKY_R * sky * ao + MIN_R;
+                vg[i] = SUN_G * ndl * ao + SKY_G * sky * ao + MIN_G;
+                vb[i] = SUN_B * ndl * ao + SKY_B * sky * ao + MIN_B;
+                if (green) { vr[i] *= tint[0]; vg[i] *= tint[1]; vb[i] *= tint[2]; }
+                vf[i] = (top ? swayTop : swayBottom) + under;
+            }
+            out.ensure(12 * FloatBuilder.STRIDE);
+            emit(out, 0); emit(out, 1); emit(out, 2);
+            emit(out, 0); emit(out, 2); emit(out, 3);
+            emit(out, 0); emit(out, 2); emit(out, 1);   // back side
+            emit(out, 0); emit(out, 3); emit(out, 2);
+        }
+    }
+
     private void emit(FloatBuilder out, int i) {
-        out.vertex(vx[i], vy[i], vz[i], vu[i], vv[i], vr[i], vg[i], vb[i]);
+        out.vertex(vx[i], vy[i], vz[i], vu[i], vv[i], vr[i], vg[i], vb[i], vf[i]);
     }
 }

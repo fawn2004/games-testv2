@@ -62,8 +62,8 @@ final class Player {
         if (pitch > 1.55f) pitch = 1.55f;
         if (pitch < -1.55f) pitch = -1.55f;
 
-        inWater = w.get(fl(x), fl(y + 0.4f), fl(z)) == Blocks.WATER;
-        headInWater = w.get(fl(x), fl(eyeY()), fl(z)) == Blocks.WATER;
+        inWater = Blocks.isWater(w.get(fl(x), fl(y + 0.4f), fl(z)));
+        headInWater = Blocks.isWater(w.get(fl(x), fl(eyeY()), fl(z)));
 
         float fx = (float) Math.sin(yaw), fz = -(float) Math.cos(yaw);
         float rx = -fz, rz = fx;

@@ -33,7 +33,11 @@ final class BlockIcons {
         Bitmap icon = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(icon);
         int shape = Blocks.shape(b);
-        if (shape == Shapes.DOOR) {
+        if (shape == Shapes.CROSS) {
+            // Plants: the sprite itself, drawn flat.
+            android.graphics.RectF r = new android.graphics.RectF(s * 0.1f, s * 0.1f, s * 0.9f, s * 0.9f);
+            c.drawBitmap(tile(Blocks.tile(b, 2), false), null, r, top);
+        } else if (shape == Shapes.DOOR) {
             // Flat door: lower and upper halves stacked.
             android.graphics.RectF r = new android.graphics.RectF(s * 0.28f, s * 0.5f, s * 0.72f, s * 0.98f);
             c.drawBitmap(tile(Blocks.doorTile(b, false), false), null, r, top);

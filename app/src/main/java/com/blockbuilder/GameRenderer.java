@@ -42,30 +42,53 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             "vec3 tonemap(vec3 x) {\n" +
             "  x *= uExposure;\n" +
             "  float l = dot(x, vec3(0.2126, 0.7152, 0.0722));\n" +
-            "  x = mix(vec3(l), x, 0.82);\n" +
+            "  x = mix(vec3(l), x, 1.0);\n" +
+            "  x = max(x, 0.0);\n" +
             "  x = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);\n" +
             "  return sqrt(x);\n" +
             "}\n";
 
     private static final String VS = SKY_FN +
-            "uniform mat4 uMVP; uniform vec3 uCam;\n" +
-            "attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aColor;\n" +
+            "uniform mat4 uMVP; uniform vec3 uCam; uniform float uTimeV;\n" +
+            "attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aColor; attribute float aFlags;\n" +
             "varying vec2 vUV; varying vec3 vLight; varying vec3 vFogCol; varying float vFog;\n" +
+            "varying vec3 vWorld; varying float vUnder;\n" +
             "void main(){\n" +
-            "  gl_Position = uMVP * vec4(aPos, 1.0);\n" +
-            "  vUV = aUV; vLight = aColor;\n" +
+            "  float under = step(1.5, aFlags);\n" +
+            "  float sway = aFlags - 2.0 * under;\n" +
+            "  vec3 p = aPos;\n" +
+            "  if (sway > 0.0) {\n" +                                  // wind
+            "    float ph = uTimeV * 1.7 + aPos.x * 0.55 + aPos.z * 0.35;\n" +
+            "    p.x += (sin(ph) * 0.06 + sin(ph * 2.3 + aPos.z) * 0.025) * sway;\n" +
+            "    p.z += (cos(ph * 0.8 + aPos.x) * 0.05) * sway;\n" +
+            "  }\n" +
+            "  gl_Position = uMVP * vec4(p, 1.0);\n" +
+            "  vUV = aUV; vLight = aColor; vWorld = aPos; vUnder = under;\n" +
             "  vec3 toV = aPos - uCam;\n" +
             "  float d = length(toV);\n" +
             "  vFog = fogAmount(d);\n" +
             "  vFogCol = skyColor(toV / max(d, 0.001), 0.6);\n" +
             "}\n";
     private static final String FS = PRECISION + TONE +
-            "uniform sampler2D uTex; uniform float uAlphaCut;\n" +
+            "uniform sampler2D uTex; uniform float uAlphaCut; uniform float uTime;\n" +
             "varying vec2 vUV; varying vec3 vLight; varying vec3 vFogCol; varying float vFog;\n" +
+            "varying vec3 vWorld; varying float vUnder;\n" +
+            "float caustic(vec2 p, float t) {\n" +
+            "  vec2 q = p * 1.35;\n" +
+            "  float a = sin(q.x * 2.1 + t * 1.2 + sin(q.y * 1.7 + t * 0.9) * 1.6);\n" +
+            "  float b = sin(q.y * 2.4 - t * 1.0 + sin(q.x * 1.9 - t * 0.7) * 1.6);\n" +
+            "  float v = 1.0 - abs((a + b) * 0.5);\n" +
+            "  return v * v * v * v;\n" +
+            "}\n" +
             "void main(){\n" +
             "  vec4 c = texture2D(uTex, vUV);\n" +
             "  if (c.a < uAlphaCut) discard;\n" +
-            "  vec3 col = mix(c.rgb * c.rgb * vLight, vFogCol, vFog);\n" +   // to linear, light, haze
+            "  vec3 col = c.rgb * c.rgb * vLight;\n" +                     // to linear, light
+            "  if (vUnder > 0.5) {\n" +                                    // light dancing on the bed
+            "    float k = caustic(vWorld.xz + vWorld.y * 0.3, uTime);\n" +
+            "    col *= vec3(0.62, 0.86, 0.95) * (0.8 + 1.4 * k);\n" +
+            "  }\n" +
+            "  col = mix(col, vFogCol, vFog);\n" +
             "  gl_FragColor = vec4(tonemap(col), c.a);\n" +
             "}\n";
 
@@ -96,10 +119,10 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             "  vec3 R = reflect(V, n); R.y = abs(R.y);\n" +
             "  vec3 refl = skyColor(R, 1.0) * (0.3 + 0.7 * vInfo.g);\n" +
             "  float spec = pow(max(dot(R, uSun), 0.0), 240.0) * vInfo.b;\n" +
-            "  vec3 deep = vec3(0.02, 0.075, 0.10) * (0.35 + 0.6 * vInfo.g + 0.9 * vInfo.b);\n" +
+            "  vec3 deep = vec3(0.03, 0.11, 0.16) * (0.35 + 0.6 * vInfo.g + 0.9 * vInfo.b);\n" +
             "  vec3 col = mix(deep, refl, fres) + vec3(1.0, 0.88, 0.65) * spec * 8.0;\n" +
             "  col = mix(col, skyColor(V, 0.6), fogAmount(dist));\n" +
-            "  float a = mix(0.70, 0.97, fres);\n" +
+            "  float a = mix(0.42, 0.95, fres);\n" +
             "  gl_FragColor = vec4(tonemap(col), a);\n" +
             "}\n";
 
@@ -139,7 +162,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private final int[] vboSolid = new int[NCH], vboWater = new int[NCH];
     private final int[] cntSolid = new int[NCH], cntWater = new int[NCH];
 
-    private int prog, aPos, aUV, aColor, uMVP, uCam, uTex, uAlphaCut;
+    private int prog, aPos, aUV, aColor, aFlags, uMVP, uCam, uTex, uAlphaCut;
     private int waterProg, waPos, waUV, waColor;
     private int skyProg, sClip, sInvVP, sCam;
     private final float[] invVP = new float[16];
@@ -170,6 +193,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         aPos = GLES20.glGetAttribLocation(prog, "aPos");
         aUV = GLES20.glGetAttribLocation(prog, "aUV");
         aColor = GLES20.glGetAttribLocation(prog, "aColor");
+        aFlags = GLES20.glGetAttribLocation(prog, "aFlags");
         uMVP = GLES20.glGetUniformLocation(prog, "uMVP");
         uCam = GLES20.glGetUniformLocation(prog, "uCam");
         uTex = GLES20.glGetUniformLocation(prog, "uTex");
@@ -260,16 +284,24 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glUniformMatrix4fv(uMVP, 1, false, mvp, 0);
         GLES20.glUniform3f(uCam, ex, ey, ez);
         GLES20.glUniform1f(uAlphaCut, 0.5f);
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTime"), time);
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTimeV"), time);
         GLES20.glDisable(GLES20.GL_BLEND);
         GLES20.glEnableVertexAttribArray(aPos);
         GLES20.glEnableVertexAttribArray(aUV);
         GLES20.glEnableVertexAttribArray(aColor);
+        GLES20.glEnableVertexAttribArray(aFlags);
         for (int i = 0; i < NCH; i++) {
-            if (cntSolid[i] > 0 && visible(i, ex, ez, fogFar)) draw(vboSolid[i], cntSolid[i], aPos, aUV, aColor);
+            if (cntSolid[i] > 0 && visible(i, ex, ez, fogFar)) {
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboSolid[i]);
+                GLES20.glVertexAttribPointer(aFlags, 1, GLES20.GL_FLOAT, false, STRIDE_BYTES, 32);
+                draw(vboSolid[i], cntSolid[i], aPos, aUV, aColor);
+            }
         }
         GLES20.glDisableVertexAttribArray(aPos);
         GLES20.glDisableVertexAttribArray(aUV);
         GLES20.glDisableVertexAttribArray(aColor);
+        GLES20.glDisableVertexAttribArray(aFlags);
 
         // Water pass
         GLES20.glUseProgram(waterProg);
@@ -317,9 +349,9 @@ final class GameRenderer implements GLSurfaceView.Renderer {
 
     private void draw(int vbo, int count, int pos, int uv, int color) {
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo);
-        GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 32, 0);
-        if (uv >= 0) GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, 32, 12);
-        GLES20.glVertexAttribPointer(color, 3, GLES20.GL_FLOAT, false, 32, 20);
+        GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, STRIDE_BYTES, 0);
+        if (uv >= 0) GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, STRIDE_BYTES, 12);
+        GLES20.glVertexAttribPointer(color, 3, GLES20.GL_FLOAT, false, STRIDE_BYTES, 20);
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, count);
     }
 
@@ -334,6 +366,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     }
 
     private static final float EXPOSURE = 0.62f;
+    private static final int STRIDE_BYTES = FloatBuilder.STRIDE * 4;
     private static final float FOG_START = 34f, FOG_DEN = 0.028f;
 
     private void processActions(float ex, float ey, float ez) {
@@ -345,7 +378,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             int hShape = Blocks.shape(hb);
             if (a == InputState.ACT_BREAK) {
                 if (hb == Blocks.BEDROCK) continue;
-                world.set(hx, hy, hz, Blocks.AIR);
+                world.set(hx, hy, hz, hb == Blocks.SEAGRASS ? Blocks.WATER : Blocks.AIR);
+                // Plants and carpets resting on top go with it; so do vines hanging below.
+                int up = world.get(hx, hy + 1, hz), upShape = Blocks.shape(up);
+                if ((upShape == Shapes.CROSS && up != Blocks.VINES) || upShape == Shapes.CARPET)
+                    world.set(hx, hy + 1, hz, up == Blocks.SEAGRASS ? Blocks.WATER : Blocks.AIR);
+                for (int vy = hy - 1; vy > 0 && world.get(hx, vy, hz) == Blocks.VINES; vy--)
+                    world.set(hx, vy, hz, Blocks.AIR);
                 if (hShape == Shapes.DOOR) {   // remove the other half too
                     int oy = (hm & Shapes.UPPER) != 0 ? hy - 1 : hy + 1;
                     if (world.get(hx, oy, hz) == hb) world.set(hx, oy, hz, Blocks.AIR);
@@ -367,9 +406,13 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                     }
                 }
                 int px = hit[3], py = hit[4], pz = hit[5];
+                if (hShape == Shapes.CROSS && hb != b) {   // building onto a plant replaces it
+                    px = hx; py = hy; pz = hz;
+                }
                 if (!World.inside(px, py, pz)) continue;
                 int cur = world.get(px, py, pz);
-                if (cur != Blocks.AIR && cur != Blocks.WATER) {
+                boolean replaceable = cur == Blocks.AIR || cur == Blocks.WATER || Blocks.shape(cur) == Shapes.CROSS;
+                if (!replaceable) {
                     // Fill the other half of a slab cell.
                     if (shape == Shapes.SLAB && cur == b) {
                         world.set(px, py, pz, Blocks.fullOf(b));
@@ -387,7 +430,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
                     meta = upperHalf ? Shapes.TOP : 0;
                 } else if (shape == Shapes.DOOR) {
                     int above = world.get(px, py + 1, pz);
-                    if (!World.inside(px, py + 1, pz) || (above != Blocks.AIR && above != Blocks.WATER)) continue;
+                    if (!World.inside(px, py + 1, pz) || (above != Blocks.AIR && !Blocks.isWater(above)
+                            && Blocks.shape(above) != Shapes.CROSS)) continue;
                     if (player.intersects(px, py + 1, pz)) continue;
                     world.set(px, py, pz, b, facing);
                     world.set(px, py + 1, pz, b, facing | Shapes.UPPER);

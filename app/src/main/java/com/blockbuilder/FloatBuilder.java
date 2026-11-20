@@ -1,8 +1,8 @@
 package com.blockbuilder;
 
-/** Growable float array used while building meshes (8 floats per vertex). */
+/** Growable float array used while building meshes (9 floats per vertex). */
 final class FloatBuilder {
-    static final int STRIDE = 8;
+    static final int STRIDE = 9;
     float[] data = new float[1 << 15];
     int size;
 
@@ -18,11 +18,12 @@ final class FloatBuilder {
         }
     }
 
-    void vertex(float x, float y, float z, float u, float v, float r, float g, float b) {
+    /** flags = sway amount (0..1) + 2 if the surface is under water. */
+    void vertex(float x, float y, float z, float u, float v, float r, float g, float b, float flags) {
         float[] d = data;
         int s = size;
         d[s] = x; d[s + 1] = y; d[s + 2] = z; d[s + 3] = u; d[s + 4] = v;
-        d[s + 5] = r; d[s + 6] = g; d[s + 7] = b;
-        size = s + 8;
+        d[s + 5] = r; d[s + 6] = g; d[s + 7] = b; d[s + 8] = flags;
+        size = s + 9;
     }
 }

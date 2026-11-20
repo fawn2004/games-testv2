@@ -381,6 +381,140 @@ final class TextureAtlas {
             }
     }
 
+    private static void put(int t, int x, int y, int rgb, float f) {
+        if (x >= 0 && y >= 0 && x < TILE && y < TILE) set(t, x, y, argb(shade(rgb, f)));
+    }
+
+    /** A blade from the bottom row upward, leaning sideways as it rises. */
+    private static void blade(int t, float x0, int height, float lean, int base, int tip) {
+        for (int k = 0; k < height; k++) {
+            float u = k / (float) Math.max(1, height - 1);
+            int x = Math.round(x0 + lean * u * u * height * 0.25f), y = 15 - k;
+            put(t, x, y, mix(base, tip, u), vary(0.06f));
+            if (k < height / 3) put(t, x + 1, y, mix(base, tip, u), 0.85f);
+        }
+    }
+
+    private static void flower(int t, int petal, int center, int style) {
+        // stems and a couple of leaves
+        for (int i = 0; i < 3; i++) {
+            float x0 = 4 + i * 4 + r.nextInt(2);
+            int hgt = 8 + r.nextInt(4);
+            blade(t, x0, hgt, r.nextFloat() - 0.5f, 0x2E5A1E, 0x4E8A32);
+            int hx = Math.round(x0 + (r.nextFloat() - 0.5f)), hy = 15 - hgt;
+            if (style == 0) {          // round petals with dark centre (wildflower)
+                for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) put(t, hx + dx, hy + dy, petal, vary(0.08f));
+                put(t, hx, hy - 2, petal, 0.9f); put(t, hx - 2, hy, petal, 0.9f); put(t, hx + 2, hy, petal, 0.85f);
+                put(t, hx, hy, center, 1f);
+            } else if (style == 1) {   // clusters of small cups (buttercups)
+                put(t, hx, hy, petal, 1.1f); put(t, hx + 1, hy, petal, 0.95f); put(t, hx, hy + 1, petal, 0.85f);
+                put(t, hx - 2, hy + 2, petal, 1f); put(t, hx - 1, hy + 2, petal, 0.9f);
+            } else if (style == 2) {   // spiky (cornflower)
+                put(t, hx, hy, petal, 1f); put(t, hx - 1, hy - 1, petal, 0.9f); put(t, hx + 1, hy - 1, petal, 0.9f);
+                put(t, hx - 1, hy + 1, petal, 0.8f); put(t, hx + 1, hy + 1, petal, 0.8f); put(t, hx, hy - 1, petal, 1.1f);
+            } else {                   // daisy: white ring, yellow centre
+                put(t, hx - 1, hy, petal, 1f); put(t, hx + 1, hy, petal, 0.95f); put(t, hx, hy - 1, petal, 1f); put(t, hx, hy + 1, petal, 0.9f);
+                put(t, hx, hy, center, 1f);
+            }
+        }
+        for (int i = 0; i < 4; i++) blade(t, 2 + r.nextInt(12), 3 + r.nextInt(3), (r.nextFloat() - 0.5f) * 2, 0x2E5A1E, 0x5A9636);
+    }
+
+    private static void paintPlants() {
+        // Grass tuft: many thin blades
+        for (int i = 0; i < 18; i++)
+            blade(Blocks.T_GRASS_TUFT, 1 + r.nextInt(14), 5 + r.nextInt(9), (r.nextFloat() - 0.5f) * 3.5f, 0x2F5E20, 0x6A9C40);
+        // Fern: arching fronds with leaflets
+        for (int i = 0; i < 5; i++) {
+            float x0 = 3 + i * 2.5f, dir = (i - 2) * 0.9f;
+            int hgt = 9 + r.nextInt(5);
+            for (int k = 0; k < hgt; k++) {
+                float u = k / (float) hgt;
+                int x = Math.round(x0 + dir * u * u * 3), y = 15 - k;
+                put(Blocks.T_FERN, x, y, 0x2F6A24, vary(0.06f));
+                if (k > 2 && k % 2 == 0) {
+                    put(Blocks.T_FERN, x - 1, y, 0x4A8E30, vary(0.08f));
+                    put(Blocks.T_FERN, x + 1, y, 0x4A8E30, vary(0.08f));
+                    if (k < hgt - 3) { put(Blocks.T_FERN, x - 2, y + 1, 0x3E7E2A, 0.9f); put(Blocks.T_FERN, x + 2, y + 1, 0x3E7E2A, 0.9f); }
+                }
+            }
+        }
+        // Bush: a round leafy clump
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                float dx = x - 7.5f, dy = (y - 9f) * 1.15f;
+                float d = (float) Math.sqrt(dx * dx + dy * dy);
+                if (d < 7.3f && r.nextFloat() > (d > 5.5f ? 0.45f : 0.12f)) {
+                    float clump = 0.85f + 0.2f * (float) Math.sin(x * 1.4f + Math.sin(y * 1.1f) * 2f);
+                    put(Blocks.T_BUSH, x, y, 0x356F27, clump * vary(0.12f) * (1.1f - d * 0.03f));
+                }
+            }
+        flower(Blocks.T_RED_FLOWER, 0xD0261E, 0x2A1A10, 0);
+        flower(Blocks.T_YELLOW_FLOWER, 0xF2CC1E, 0xF2CC1E, 1);
+        flower(Blocks.T_BLUE_FLOWER, 0x4A6EE0, 0x4A6EE0, 2);
+        flower(Blocks.T_WHITE_FLOWER, 0xF4F2EA, 0xF0C020, 3);
+        // Wheat: golden stalks with heavy heads
+        for (int i = 0; i < 8; i++) {
+            float x0 = 1 + i * 2 + r.nextInt(2) * 0.5f;
+            int hgt = 11 + r.nextInt(4);
+            float lean = (r.nextFloat() - 0.5f) * 1.2f;
+            blade(Blocks.T_WHEAT, x0, hgt, lean, 0xA88A36, 0xD8B44A);
+            int hx = Math.round(x0 + lean * hgt * 0.25f), hy = 15 - hgt;
+            for (int k = 0; k < 4; k++) {
+                put(Blocks.T_WHEAT, hx, hy + k, 0xE8C860, vary(0.08f));
+                put(Blocks.T_WHEAT, hx + ((k & 1) == 0 ? 1 : -1), hy + k, 0xC8A040, vary(0.08f));
+            }
+        }
+        // Hanging vines: strands with alternating leaves
+        for (int i = 0; i < 5; i++) {
+            int x = 1 + i * 3 + r.nextInt(2), len = 10 + r.nextInt(7);
+            for (int y = 0; y < Math.min(16, len); y++) {
+                put(Blocks.T_VINES, x, y, 0x2E5E22, vary(0.08f));
+                if (y % 3 == 1) put(Blocks.T_VINES, x - 1, y, 0x4C8A30, vary(0.1f));
+                if (y % 3 == 2) put(Blocks.T_VINES, x + 1, y, 0x4C8A30, vary(0.1f));
+            }
+        }
+        // Seagrass: tall wavy ribbons
+        for (int i = 0; i < 6; i++) {
+            float x0 = 1 + i * 2.6f;
+            int hgt = 10 + r.nextInt(6);
+            for (int k = 0; k < hgt; k++) {
+                int x = Math.round(x0 + (float) Math.sin(k * 0.6f + i) * 1.2f);
+                put(Blocks.T_SEAGRASS, x, 15 - k, mix(0x2E6A3A, 0x6AB45A, k / (float) hgt), vary(0.06f));
+            }
+        }
+        // Moss: dense, soft, opaque
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                float p = r.nextFloat();
+                int c = p < 0.15f ? 0x7FA83E : p < 0.4f ? 0x4E7A26 : 0x5E8C2E;
+                put(Blocks.T_MOSS, x, y, c, vary(0.06f));
+            }
+        // Leaf litter: scattered fallen leaves (gaps show the ground beneath)
+        int[] leafCols = {0xC0662A, 0xD88A30, 0x9A4A22, 0xE0B040, 0x7A5A2A};
+        for (int i = 0; i < 26; i++) {
+            int x = r.nextInt(15), y = r.nextInt(15), c = leafCols[r.nextInt(leafCols.length)];
+            put(Blocks.T_LEAF_LITTER, x, y, c, vary(0.08f));
+            put(Blocks.T_LEAF_LITTER, x + 1, y, c, 0.9f);
+            put(Blocks.T_LEAF_LITTER, x, y + 1, c, 0.8f);
+            if (r.nextBoolean()) put(Blocks.T_LEAF_LITTER, x + 1, y + 1, c, 0.7f);
+        }
+        // Coarse dirt: dirt with grit and small stones
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                float p = r.nextFloat();
+                int c = p < 0.1f ? 0x6E6A64 : p < 0.16f ? 0x4A3624 : p < 0.2f ? 0x9A8670 : 0x7A5636;
+                put(Blocks.T_COARSE_DIRT, x, y, c, vary(0.08f));
+            }
+        // Forest floor: dark soil strewn with orange leaves and a little moss
+        for (int y = 0; y < TILE; y++)
+            for (int x = 0; x < TILE; x++) {
+                float p = r.nextFloat();
+                int c = p < 0.22f ? 0xB8622A : p < 0.32f ? 0xD08A34 : p < 0.38f ? 0x5A7A2A : p < 0.5f ? 0x3E2A1C : 0x5C3E26;
+                put(Blocks.T_FOREST_FLOOR, x, y, c, vary(0.07f));
+            }
+    }
+
     private static void paintStone(int t, Stone s) {
         int b = s.base, a = s.accent, a2 = s.accent2;
         switch (s.style) {
@@ -527,14 +661,20 @@ final class TextureAtlas {
         r = new Random(1337);
 
         // ---------------- original tiles
-        noisy(Blocks.T_GRASS_TOP, 0x5A9236, 0.12f);
+        noisy(Blocks.T_GRASS_TOP, 0x4C8434, 0.10f);
+        for (int i = 0; i < 30; i++) {   // darker and lighter blade strokes
+            int x = r.nextInt(16), y = r.nextInt(15);
+            int c = r.nextBoolean() ? shade(0x4C8434, 0.78f) : shade(0x4C8434, 1.15f);
+            set(Blocks.T_GRASS_TOP, x, y, argb(c));
+            set(Blocks.T_GRASS_TOP, x, y + 1, argb(shade(c, 0.92f)));
+        }
         noisy(Blocks.T_DIRT, 0x866043, 0.14f);
         for (int i = 0; i < 18; i++)
             set(Blocks.T_DIRT, r.nextInt(16), r.nextInt(16), argb(shade(0x866043, 0.7f)));
         for (int x = 0; x < TILE; x++) {
             int depth = 3 + r.nextInt(2) + (r.nextInt(5) == 0 ? 2 : 0);
             for (int y = 0; y < TILE; y++) {
-                int c = y < depth ? shade(0x558C33, vary(0.12f)) : shade(0x866043, vary(0.14f));
+                int c = y < depth ? shade(0x4A8030, vary(0.12f)) : shade(0x866043, vary(0.14f));
                 set(Blocks.T_GRASS_SIDE, x, y, argb(c));
             }
         }
@@ -723,6 +863,7 @@ final class TextureAtlas {
         for (int i = 0; i < Wood.ALL.length; i++) paintWood(Blocks.T_WOOD0 + i * 6, Wood.ALL[i], i);
         int st = Blocks.T_STONE0;
         for (Stone s : Stone.ALL) if (s.existing < 0) paintStone(st++, s);
+        paintPlants();
 
         int[] more = {0xF29BB8, 0x8CD63C, 0x2AA6A6, 0x7DB8F0, 0x7A4E2E, 0x6A6A70, 0xAEAEB4, 0xC03CB0};
         for (int i = 0; i < more.length; i++) colorBlock(Blocks.T_COLOR8 + i, more[i], false);

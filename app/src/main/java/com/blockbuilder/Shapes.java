@@ -8,7 +8,7 @@ package com.blockbuilder;
  * 3 open, 4 hinge on the right, 5 upper door half.
  */
 final class Shapes {
-    static final int CUBE = 0, STAIRS = 1, SLAB = 2, DOOR = 3, TRAPDOOR = 4;
+    static final int CUBE = 0, STAIRS = 1, SLAB = 2, DOOR = 3, TRAPDOOR = 4, CROSS = 5, CARPET = 6;
     static final int TOP = 4, OPEN = 8, HINGE_RIGHT = 16, UPPER = 32;
     private static final float T = 3f / 16f;
 
@@ -45,6 +45,10 @@ final class Shapes {
                 rotate(out, 0, f);
                 return 1;
             }
+            case CROSS:     // plants: a smaller box for aiming (they have no collision)
+                return put(out, 0, 0.15f, 0, 0.15f, 0.85f, 0.8f, 0.85f);
+            case CARPET:
+                return put(out, 0, 0, 0, 0, 1, 1f / 16f, 1);
             default:
                 return put(out, 0, 0, 0, 0, 1, 1, 1);
         }
