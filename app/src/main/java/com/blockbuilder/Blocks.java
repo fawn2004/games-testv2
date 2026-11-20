@@ -251,15 +251,16 @@ final class Blocks {
         return upper ? TILES[b][2] : TILES[b][1];
     }
 
-    static final int WOOD_TAB = 2, STONE_TAB = 3;
+    static final int ANIMALS_TAB = 2, WOOD_TAB = 3, STONE_TAB = 4;
 
     /** Inventory tabs. Wood and Stone are browsed by group instead (see GROUPS). */
-    static final String[] CATEGORY_NAMES = {"Natural", "Plants", "Wood", "Stone", "Building", "Minerals", "Colors"};
+    static final String[] CATEGORY_NAMES = {"Natural", "Plants", "Animals", "Wood", "Stone", "Building", "Minerals", "Colors"};
     static final int[][] CATEGORIES = {
             {GRASS, DIRT, COARSE_DIRT, FOREST_FLOOR, STONE, COBBLE, MOSSY_COBBLE, GRAVEL, SAND,
                     RED_SAND, CLAY, MUD, SNOW, ICE, WATER},
             {GRASS_TUFT, FERN, BUSH, RED_FLOWER, YELLOW_FLOWER, BLUE_FLOWER, WHITE_FLOWER, WHEAT,
                     VINES, SEAGRASS, MOSS_CARPET, LEAF_LITTER, MOSS_BLOCK},
+            eggs(),
             // Wood tab: these are shown under "Leaves & More"; species are listed separately.
             {LOG, PLANKS, LIGHT_LOG, LIGHT_PLANKS, DARK_LOG, DARK_PLANKS, LEAVES, AUTUMN_LEAVES,
                     BLOSSOM_LEAVES, NEEDLES, HAY, CRATE, BOOKSHELF},
@@ -322,6 +323,12 @@ final class Blocks {
 
     static int groupOf(int b) {
         return GROUP_OF[b];
+    }
+
+    private static int[] eggs() {
+        int[] e = new int[Animal.ALL.size()];
+        for (int i = 0; i < e.length; i++) e[i] = Animal.eggId(i);
+        return e;
     }
 
     /** face: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z */

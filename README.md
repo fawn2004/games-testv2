@@ -19,6 +19,8 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
   Tropical Rainforest, Autumn Hills, Blossom Valley, Shrubland, Meadow, Snowy Peaks, Tropical Marsh)
 - Tree shapes per family: broad, round, slender, cone, pine, giant, tropical, savanna, cedar,
   cypress, palm and shrubs
+- 12 animals (cow, pig, sheep, chicken, duck, rabbit, deer, fox, bear, kangaroo, frog, penguin) that
+  wander, hop, swim and flee, spawning by biome; spawn eggs in the Animals tab place your own
 - Themed villages: Medieval (timber-frame cottages, church, well), Fantasy (cone-roofed towers,
   crystal fountain) and Darwin (raised tropical houses on stilts with verandas and metal roofs)
 - Title screen to create, play and delete multiple worlds (normal or flat terrain, optional seed)
@@ -56,6 +58,8 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 | Fly | FLY button (then UP / DOWN) |
 | Pick blocks | Tap a hotbar slot, or tap **+** to choose any block (by tab) for the selected slot. In the Wood and Stone tabs, pick a wood or stone to see its pieces; drag to scroll |
 | Open / close doors | Tap a door or trapdoor in Build mode |
+| Place an animal | Pick its spawn egg (Animals tab) and tap the ground in Build mode |
+| Remove an animal | Tap it in Break mode |
 | Back to the world list | MENU button (top-left) or the phone's Back button |
 
 ## Building from source

@@ -289,7 +289,7 @@ final class HudView extends View {
         fill.setColor(0xEE2A2F3A);
         c.drawRoundRect(rect, 12 * dp, 12 * dp, fill);
         text.setTextSize(17 * dp);
-        c.drawText("Slot " + (in.selected + 1) + ": " + Blocks.NAMES[in.hotbar[in.selected]],
+        c.drawText("Slot " + (in.selected + 1) + ": " + Animal.itemName(in.hotbar[in.selected]),
                 w / 2f, invTop + 27 * dp, text);
 
         // Tabs
@@ -455,7 +455,7 @@ final class HudView extends View {
                 releaseMovement();
             } else {
                 in.selected = s;
-                showToast(Blocks.NAMES[in.hotbar[s]], 1500);
+                showToast(Animal.itemName(in.hotbar[s]), 1500);
             }
             haptic();
         } else if (inCircle(x, y, menuX, menuY, menuR)) {
@@ -597,7 +597,7 @@ final class HudView extends View {
             switch (eKind[i]) {
                 case E_BLOCK:
                     in.hotbar[in.selected] = eValue[i];
-                    showToast(Blocks.NAMES[eValue[i]], 1500);
+                    showToast(Animal.itemName(eValue[i]), 1500);
                     haptic();
                     invOpen = false;
                     return;

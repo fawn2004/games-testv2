@@ -160,6 +160,22 @@ final class GameRenderer implements GLSurfaceView.Renderer {
             "  gl_FragColor = vec4(tonemap(c), 1.0);\n" +
             "}\n";
 
+    /** Animals: coloured, already-lit boxes in camera-relative coordinates. */
+    private static final String ENT_VS = SKY_FN +
+            "uniform mat4 uMVP;\n" +
+            "attribute vec3 aPos; attribute vec3 aColor;\n" +
+            "varying vec3 vColor; varying vec3 vFogCol; varying float vFog;\n" +
+            "void main(){\n" +
+            "  gl_Position = uMVP * vec4(aPos, 1.0);\n" +
+            "  vColor = aColor;\n" +
+            "  float d = length(aPos);\n" +
+            "  vFog = fogAmount(d);\n" +
+            "  vFogCol = skyColor(aPos / max(d, 0.001), 0.6);\n" +
+            "}\n";
+    private static final String ENT_FS = PRECISION + TONE +
+            "varying vec3 vColor; varying vec3 vFogCol; varying float vFog;\n" +
+            "void main(){ gl_FragColor = vec4(tonemap(mix(vColor, vFogCol, vFog)), 1.0); }\n";
+
     private static final String LINE_VS =
             "uniform mat4 uMVP; attribute vec3 aPos;\n" +
             "void main(){ gl_Position = uMVP * vec4(aPos, 1.0); }\n";
@@ -254,6 +270,10 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private int waterProg, waPos, waUV, waColor, wuMVP, wuOffset, wuBase, wuTime;
     private int skyProg, sClip, sInvVP, sCam;
     private int lineProg, laPos, luMVP, luColor;
+    private int entProg, eaPos, eaColor, euMVP;
+    private FloatBuffer entBuf;
+    final Mobs mobs;
+    private final double[] mobDist = new double[1];
     private int tex;
     private final float[] invVP = new float[16];
     private final FloatBuffer quad = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder())
@@ -275,6 +295,8 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         this.player = player;
         this.input = input;
         this.dir = dir;
+        this.mobs = new Mobs(world);
+        mobs.load(dir);
     }
 
     @Override
@@ -304,6 +326,11 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         sInvVP = GLES20.glGetUniformLocation(skyProg, "uInvVP");
         sCam = GLES20.glGetUniformLocation(skyProg, "uCam");
         quad.position(0);
+
+        entProg = link(ENT_VS, ENT_FS);
+        eaPos = GLES20.glGetAttribLocation(entProg, "aPos");
+        eaColor = GLES20.glGetAttribLocation(entProg, "aColor");
+        euMVP = GLES20.glGetUniformLocation(entProg, "uMVP");
 
         lineProg = link(LINE_VS, LINE_FS);
         laPos = GLES20.glGetAttribLocation(lineProg, "aPos");
@@ -448,6 +475,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         if (dir == null) return;
         for (Chunk c : world.chunks.values()) if (c.modified) SaveManager.saveChunk(dir, c);
         SaveManager.savePlayer(dir, player, input);
+        mobs.save(dir);
     }
 
     void shutdown() {
@@ -479,6 +507,7 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         if (ready) {
             processActions();
             player.update(dt, world, input);
+            mobs.update(dt, player.x, player.y, player.z);
         }
         scheduleMeshes();
         uploadResults();
@@ -540,6 +569,28 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(aUV);
         GLES20.glDisableVertexAttribArray(aColor);
         GLES20.glDisableVertexAttribArray(aFlags);
+
+        // Animals
+        int nEnt = mobs.buildMeshes(px, py, pz, dir3[0], dir3[2]);
+        if (nEnt > 0) {
+            if (entBuf == null || entBuf.capacity() < nEnt) {
+                entBuf = ByteBuffer.allocateDirect(Math.max(nEnt, 1 << 15) * 4 * 2).order(ByteOrder.nativeOrder()).asFloatBuffer();
+            }
+            entBuf.clear();
+            entBuf.put(mobs.data(), 0, nEnt);
+            GLES20.glUseProgram(entProg);
+            common(entProg, under, fogStart, fogDen);
+            GLES20.glUniformMatrix4fv(euMVP, 1, false, mvp, 0);
+            GLES20.glEnableVertexAttribArray(eaPos);
+            GLES20.glEnableVertexAttribArray(eaColor);
+            entBuf.position(0);
+            GLES20.glVertexAttribPointer(eaPos, 3, GLES20.GL_FLOAT, false, 24, entBuf);
+            entBuf.position(3);
+            GLES20.glVertexAttribPointer(eaColor, 3, GLES20.GL_FLOAT, false, 24, entBuf);
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, nEnt / 6);
+            GLES20.glDisableVertexAttribArray(eaPos);
+            GLES20.glDisableVertexAttribArray(eaColor);
+        }
 
         // Water pass
         GLES20.glUseProgram(waterProg);
@@ -614,7 +665,26 @@ final class GameRenderer implements GLSurfaceView.Renderer {
         double ex = player.x, ey = player.eyeY(), ez = player.z;
         Integer a;
         while ((a = input.actions.poll()) != null) {
-            if (!world.raycast(ex, ey, ez, dir3[0], dir3[1], dir3[2], 6f, hit, hitPos)) continue;
+            boolean blockHit = world.raycast(ex, ey, ez, dir3[0], dir3[1], dir3[2], 6f, hit, hitPos);
+            double blockDist = blockHit ? Math.sqrt((hitPos[0] - ex) * (hitPos[0] - ex) + (hitPos[1] - ey) * (hitPos[1] - ey)
+                    + (hitPos[2] - ez) * (hitPos[2] - ez)) : 6.0;
+            Mob mob = mobs.pick(ex, ey, ez, dir3[0], dir3[1], dir3[2], blockDist, mobDist);
+            int held = input.selectedBlock();
+            if (mob != null) {
+                if (a == InputState.ACT_BREAK) mobs.list.remove(mob);       // shoo it away
+                else if (!Animal.isEgg(held)) { if (mob.onGround) mob.vy = 6f; } // a happy hop
+                else mobs.add(Animal.ofEgg(held), mob.x + 0.6, mob.y, mob.z, true);
+                continue;
+            }
+            if (!blockHit) continue;
+            if (a == InputState.ACT_PLACE && Animal.isEgg(held)) {
+                // Spawn eggs: the animal appears on the face that was tapped.
+                int sx = hit[3], sy = hit[4], sz = hit[5];
+                if (Blocks.shape(world.get(hit[0], hit[1], hit[2])) == Shapes.CROSS) { sx = hit[0]; sy = hit[1]; sz = hit[2]; }
+                if (hit[6] == 3) sy -= (int) Math.ceil(Animal.ofEgg(held).height) - 1;   // tapped a ceiling
+                if (!world.solidAt(sx, sy, sz)) mobs.add(Animal.ofEgg(held), sx + 0.5, sy, sz + 0.5, true);
+                continue;
+            }
             int hx = hit[0], hy = hit[1], hz = hit[2];
             int hb = world.get(hx, hy, hz), hm = world.getMeta(hx, hy, hz);
             int hShape = Blocks.shape(hb);

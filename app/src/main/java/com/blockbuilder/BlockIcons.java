@@ -24,7 +24,46 @@ final class BlockIcons {
     }
 
     /** The icon for a block, created on first use. */
+    private static final java.util.HashMap<Integer, Bitmap> eggIcons = new java.util.HashMap<>();
+
+    /** A speckled egg in the animal's colours. */
+    private static Bitmap egg(Context ctx, int id) {
+        Bitmap cached = eggIcons.get(id);
+        if (cached != null) return cached;
+        Animal a = Animal.ofEgg(id);
+        float dp = ctx.getResources().getDisplayMetrics().density;
+        int s = (int) (40 * dp);
+        Bitmap bm = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bm);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        android.graphics.RectF oval = new android.graphics.RectF(s * 0.24f, s * 0.08f, s * 0.76f, s * 0.92f);
+        p.setColor(0xFF000000 | a.eggBase);
+        c.drawOval(oval, p);
+        c.save();
+        android.graphics.Path clip = new android.graphics.Path();
+        clip.addOval(oval, android.graphics.Path.Direction.CW);
+        c.clipPath(clip);
+        p.setColor(0xFF000000 | a.eggSpots);
+        java.util.Random r = new java.util.Random(id * 31L);
+        for (int i = 0; i < 9; i++) {
+            float x = s * (0.28f + r.nextFloat() * 0.44f), y = s * (0.14f + r.nextFloat() * 0.74f);
+            c.drawCircle(x, y, s * (0.04f + r.nextFloat() * 0.05f), p);
+        }
+        p.setShader(new android.graphics.RadialGradient(s * 0.42f, s * 0.3f, s * 0.45f, 0x66FFFFFF, 0x33000000,
+                android.graphics.Shader.TileMode.CLAMP));
+        c.drawOval(oval, p);
+        c.restore();
+        p.setShader(null);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(1.5f * dp);
+        p.setColor(0x66000000);
+        c.drawOval(oval, p);
+        eggIcons.put(id, bm);
+        return bm;
+    }
+
     static synchronized Bitmap icon(Context ctx, int b) {
+        if (Animal.isEgg(b)) return egg(ctx, b);
         if (icons == null) icons = new Bitmap[Blocks.COUNT];
         if (b <= 0 || b >= Blocks.COUNT) return null;
         if (icons[b] != null) return icons[b];

@@ -76,7 +76,7 @@ final class SaveManager {
             int n = din.readInt();
             for (int i = 0; i < n; i++) {
                 int b = din.readInt();
-                if (i < in.hotbar.length && b > 0 && b < Blocks.COUNT) in.hotbar[i] = b;
+                if (i < in.hotbar.length && ((b > 0 && b < Blocks.COUNT) || Animal.isEgg(b))) in.hotbar[i] = b;
             }
             return true;
         } catch (Exception e) {
