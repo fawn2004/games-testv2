@@ -3,7 +3,6 @@ package com.blockbuilder;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.LightingColorFilter;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.HapticFeedbackConstants;
@@ -16,7 +15,8 @@ final class HudView extends View {
 
     private final InputState in;
     private final float dp;
-    private final Bitmap[] icons = new Bitmap[Blocks.COUNT];
+    private final Bitmap[] icons;
+    private final Runnable onMenu;
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -24,15 +24,14 @@ final class HudView extends View {
     private final RectF rect = new RectF();
 
     // Layout
+    private float menuX, menuY, menuR;
     private float jumpX, jumpY, jumpR, downX, downY, downR, modeX, modeY, modeR, flyX, flyY, flyR;
     private float slot, barX, barY;
     private float invX, invY, invCell;
     private static final int INV_COLS = 7;
-    private final RectF newWorldRect = new RectF();
 
     // State
     private boolean invOpen;
-    private long confirmUntil;
     private int joyId = -1, lookId = -1, jumpId = -1, downId = -1;
     private float joyCx, joyCy, joyKx, joyKy, joyR;
     private float lookLastX, lookLastY, lookStartX, lookStartY;
@@ -52,9 +51,11 @@ final class HudView extends View {
         }
     };
 
-    HudView(Context ctx, InputState in) {
+    HudView(Context ctx, InputState in, Runnable onMenu) {
         super(ctx);
         this.in = in;
+        this.onMenu = onMenu;
+        icons = BlockIcons.get(ctx);
         dp = ctx.getResources().getDisplayMetrics().density;
         stroke.setStyle(Paint.Style.STROKE);
         text.setColor(0xFFFFFFFF);
@@ -62,60 +63,7 @@ final class HudView extends View {
         text.setFakeBoldText(true);
         text.setShadowLayer(3 * dp, 0, 1 * dp, 0xFF000000);
         iconPaint.setFilterBitmap(false);
-        buildIcons();
         showToast("Left: move   Right: look   Tap: build/break   Hold: break", 7000);
-    }
-
-    // ------------------------------------------------------------------ icons
-
-    private void buildIcons() {
-        int[] atlas = TextureAtlas.pixels();
-        int s = (int) (44 * dp);
-        Bitmap[] tiles = new Bitmap[256];
-        android.graphics.Matrix m = new android.graphics.Matrix();
-        Paint p = new Paint();
-        p.setFilterBitmap(false);
-        Paint left = new Paint(p), right = new Paint(p);
-        left.setColorFilter(new LightingColorFilter(0xFFC8C8C8, 0));
-        right.setColorFilter(new LightingColorFilter(0xFF9A9A9A, 0));
-        for (int b = 1; b < Blocks.COUNT; b++) {
-            Bitmap icon = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(icon);
-            int[] t = Blocks.TILES[b];
-            Bitmap top = tile(tiles, atlas, t[0]), side = tile(tiles, atlas, t[1]);
-            // left face
-            poly(m, s, 0.06f, 0.29f, 0.5f, 0.52f, 0.06f, 0.74f);
-            c.drawBitmap(side, m, left);
-            // right face
-            poly(m, s, 0.5f, 0.52f, 0.94f, 0.29f, 0.5f, 0.97f);
-            c.drawBitmap(side, m, right);
-            // top face
-            poly(m, s, 0.06f, 0.29f, 0.5f, 0.06f, 0.5f, 0.52f);
-            c.drawBitmap(top, m, p);
-            icons[b] = icon;
-        }
-    }
-
-    /** Maps tile corners (0,0),(16,0),(0,16) to three points of a parallelogram. */
-    private static void poly(android.graphics.Matrix m, int s, float ax, float ay, float bx, float by, float cx, float cy) {
-        float[] src = {0, 0, 16, 0, 0, 16};
-        float[] dst = {ax * s, ay * s, bx * s, by * s, cx * s, cy * s};
-        m.setPolyToPoly(src, 0, dst, 0, 3);
-    }
-
-    private static Bitmap tile(Bitmap[] cache, int[] atlas, int t) {
-        if (cache[t] != null) return cache[t];
-        int[] px = new int[256];
-        int ox = (t & 15) * 16, oy = (t >> 4) * 16;
-        for (int y = 0; y < 16; y++)
-            for (int x = 0; x < 16; x++) {
-                int c = atlas[(oy + y) * TextureAtlas.SIZE + ox + x];
-                if (t == Blocks.T_GLASS && (c >>> 24) == 0) c = 0x40CFE8F2;
-                px[y * 16 + x] = c;
-            }
-        Bitmap b = Bitmap.createBitmap(px, 16, 16, Bitmap.Config.ARGB_8888);
-        cache[t] = b;
-        return b;
     }
 
     // ------------------------------------------------------------------ layout
@@ -146,10 +94,10 @@ final class HudView extends View {
         invCell = Math.min(64 * dp, Math.min((w - 40 * dp) / INV_COLS, (h - 120 * dp) / 4f));
         int rows = (Blocks.PLACEABLE.length + INV_COLS - 1) / INV_COLS;
         invX = w / 2f - invCell * INV_COLS / 2f;
-        invY = h / 2f - invCell * (rows + 1) / 2f;
-        float nwW = 150 * dp, nwH = 36 * dp;
-        float nwY = invY + rows * invCell + invCell * 0.5f - nwH / 2f + 6 * dp;
-        newWorldRect.set(w / 2f - nwW / 2f, nwY, w / 2f + nwW / 2f, nwY + nwH);
+        invY = h / 2f - invCell * rows / 2f + 16 * dp;
+        menuR = 26 * dp;
+        menuX = 46 * dp;
+        menuY = 46 * dp;
     }
 
     // ------------------------------------------------------------------ drawing
@@ -183,6 +131,7 @@ final class HudView extends View {
         if (in.flying) button(c, downX, downY, downR, "DOWN", downId != -1);
         button(c, modeX, modeY, modeR, in.breakMode ? "BREAK" : "BUILD", in.breakMode);
         button(c, flyX, flyY, flyR, "FLY", in.flying);
+        button(c, menuX, menuY, menuR, "MENU", false);
 
         // Hotbar
         for (int i = 0; i <= SLOTS; i++) {
@@ -220,7 +169,7 @@ final class HudView extends View {
         c.drawRect(0, 0, w, h, fill);
         int rows = (Blocks.PLACEABLE.length + INV_COLS - 1) / INV_COLS;
         rect.set(invX - 12 * dp, invY - 44 * dp, invX + invCell * INV_COLS + 12 * dp,
-                invY + invCell * (rows + 1) + 12 * dp);
+                invY + invCell * rows + 12 * dp);
         fill.setColor(0xEE2A2F3A);
         c.drawRoundRect(rect, 12 * dp, 12 * dp, fill);
         text.setTextSize(18 * dp);
@@ -232,12 +181,6 @@ final class HudView extends View {
             c.drawRoundRect(rect, 6 * dp, 6 * dp, fill);
             drawIcon(c, Blocks.PLACEABLE[i], rect);
         }
-        boolean confirming = now < confirmUntil;
-        fill.setColor(confirming ? 0xFFC0392B : 0xFF505868);
-        c.drawRoundRect(newWorldRect, 8 * dp, 8 * dp, fill);
-        text.setTextSize(15 * dp);
-        c.drawText(confirming ? "Tap again to confirm" : "New World", newWorldRect.centerX(),
-                newWorldRect.centerY() + 5 * dp, text);
     }
 
     private void drawIcon(Canvas c, int block, RectF r) {
@@ -326,6 +269,10 @@ final class HudView extends View {
                 showToast(Blocks.NAMES[in.hotbar[s]], 1500);
             }
             haptic();
+        } else if (inCircle(x, y, menuX, menuY, menuR)) {
+            releaseMovement();
+            haptic();
+            post(onMenu);
         } else if (inCircle(x, y, jumpX, jumpY, jumpR)) {
             jumpId = id;
             in.jump = true;
@@ -406,20 +353,6 @@ final class HudView extends View {
     }
 
     private void inventoryTap(float x, float y) {
-        if (newWorldRect.contains(x, y)) {
-            long now = System.currentTimeMillis();
-            if (now < confirmUntil) {
-                in.actions.add(InputState.ACT_NEW_WORLD);
-                confirmUntil = 0;
-                invOpen = false;
-                showToast("Generating a new world...", 2000);
-            } else {
-                confirmUntil = now + 3000;
-                postInvalidateDelayed(3050);
-            }
-            haptic();
-            return;
-        }
         int col = (int) Math.floor((x - invX) / invCell), row = (int) Math.floor((y - invY) / invCell);
         if (x >= invX && col < INV_COLS && y >= invY && row >= 0) {
             int i = row * INV_COLS + col;

@@ -203,11 +203,6 @@ final class GameRenderer implements GLSurfaceView.Renderer {
     private void processActions(float ex, float ey, float ez) {
         Integer a;
         while ((a = input.actions.poll()) != null) {
-            if (a == InputState.ACT_NEW_WORLD) {
-                world.generate(System.nanoTime());
-                player.spawn(world);
-                continue;
-            }
             if (!world.raycast(ex, ey, ez, dir[0], dir[1], dir[2], 6f, hit)) continue;
             if (a == InputState.ACT_BREAK) {
                 if (world.get(hit[0], hit[1], hit[2]) != Blocks.BEDROCK) {

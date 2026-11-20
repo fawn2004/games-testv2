@@ -9,11 +9,12 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
-public class MainActivity extends Activity {
-    private GLSurfaceView glView;
+public class MainActivity extends Activity implements MenuView.Listener {
+    private GLSurfaceView glView;   // non-null while a world is being played
     private World world;
     private Player player;
     private InputState input;
+    private WorldStore.Meta current;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,21 +27,37 @@ public class MainActivity extends Activity {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             win.setAttributes(lp);
         }
+        WorldStore.migrateLegacy(this);
+        showMenu();
+    }
 
+    private void showMenu() {
+        setContentView(new MenuView(this, this));
+        hideSystemUi();
+    }
+
+    @Override
+    public void onPlay(WorldStore.Meta meta) {
+        if (glView != null) return;
+        current = meta;
         world = new World();
         player = new Player();
         input = new InputState();
-        if (!SaveManager.load(this, world, player, input)) {
-            world.generate(System.nanoTime());
+        if (SaveManager.load(WorldStore.dataFile(this, meta), world, player, input)) {
+            meta.seed = world.seed;
+        } else {
+            world.generate(meta.seed, meta.flat);
             player.spawn(world);
         }
+        meta.lastPlayed = System.currentTimeMillis();
+        WorldStore.saveMeta(this, meta);
 
         glView = new GLSurfaceView(this);
         glView.setEGLContextClientVersion(2);
         glView.setPreserveEGLContextOnPause(true);
         glView.setRenderer(new GameRenderer(world, player, input));
 
-        HudView hud = new HudView(this, input);
+        HudView hud = new HudView(this, input, this::exitToMenu);
         FrameLayout root = new FrameLayout(this);
         root.addView(glView);
         root.addView(hud);
@@ -48,18 +65,42 @@ public class MainActivity extends Activity {
         hideSystemUi();
     }
 
+    private void saveGame() {
+        if (glView == null || current == null) return;
+        glView.onPause(); // blocks until the GL thread has paused, so the world is safe to read
+        SaveManager.save(WorldStore.dataFile(this, current), world, player, input);
+        current.lastPlayed = System.currentTimeMillis();
+        WorldStore.saveMeta(this, current);
+    }
+
+    private void exitToMenu() {
+        if (glView == null) return;
+        saveGame();
+        glView = null;
+        world = null;
+        player = null;
+        input = null;
+        current = null;
+        showMenu();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (glView != null) exitToMenu();
+        else super.onBackPressed();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        glView.onResume();
+        if (glView != null) glView.onResume();
         hideSystemUi();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        glView.onPause(); // blocks until the GL thread has paused
-        SaveManager.save(this, world, player, input);
+        saveGame();
     }
 
     @Override

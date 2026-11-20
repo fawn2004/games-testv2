@@ -6,11 +6,12 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 "install unknown apps" when asked.
 
 ## Features
+- Title screen to create, play and delete multiple worlds (normal or flat terrain, optional seed)
 - 128 × 128 × 64 world with procedural hills, mountains with snow, beaches, lakes and trees
 - 20 placeable blocks, including grass, stone, wood, glass, brick, water and 8 colored blocks
 - Ambient-occlusion lighting, distance fog, translucent water and an underwater tint
 - Walking with auto-jump, swimming, and a fly mode
-- Your world is saved automatically when you leave the app
+- Worlds are saved automatically when you go back to the menu or leave the app
 
 ## Controls
 | Action | Touch |
@@ -22,7 +23,7 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 | Jump / swim up | JUMP button |
 | Fly | FLY button (then UP / DOWN) |
 | Pick blocks | Tap a hotbar slot, or tap **+** to choose any block for the selected slot |
-| New world | **+** → New World (tap twice to confirm) |
+| Back to the world list | MENU button (top-left) or the phone's Back button |
 
 ## Building from source
 Requires JDK 17+ and the Android SDK (platform 34, build-tools 34).

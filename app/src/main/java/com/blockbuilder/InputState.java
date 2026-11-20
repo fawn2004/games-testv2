@@ -4,7 +4,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Shared between the UI thread (touch HUD) and the GL thread (game loop). */
 final class InputState {
-    static final int ACT_BREAK = 1, ACT_PLACE = 2, ACT_NEW_WORLD = 3;
+    static final int ACT_BREAK = 1, ACT_PLACE = 2;
 
     volatile float moveX, moveY;     // joystick: x = strafe right, y = forward
     volatile boolean jump, down;

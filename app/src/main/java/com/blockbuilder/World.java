@@ -8,6 +8,7 @@ final class World {
     static final int SX = 128, SY = 64, SZ = 128;
     static final int CS = 16, CX = SX / CS, CZ = SZ / CS;
     static final int SEA = 21;
+    static final int FLAT_TOP = 10;
 
     final byte[] blocks = new byte[SX * SY * SZ];
     final boolean[] chunkDirty = new boolean[CX * CZ];
@@ -59,9 +60,20 @@ final class World {
         return 0;
     }
 
-    void generate(long seed) {
+    void generate(long seed, boolean flat) {
         this.seed = seed;
         Arrays.fill(blocks, (byte) 0);
+        if (flat) {
+            for (int x = 0; x < SX; x++)
+                for (int z = 0; z < SZ; z++)
+                    for (int y = 0; y <= FLAT_TOP; y++) {
+                        int b = y == 0 ? Blocks.BEDROCK : y < FLAT_TOP - 3 ? Blocks.STONE
+                                : y < FLAT_TOP ? Blocks.DIRT : Blocks.GRASS;
+                        blocks[idx(x, y, z)] = (byte) b;
+                    }
+            markAllDirty();
+            return;
+        }
         Noise hills = new Noise(seed);
         Noise mountains = new Noise(seed * 31 + 7);
         Random rnd = new Random(seed);

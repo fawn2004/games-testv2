@@ -1,6 +1,5 @@
 package com.blockbuilder;
 
-import android.content.Context;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -17,9 +16,8 @@ import java.util.zip.GZIPOutputStream;
 final class SaveManager {
     private static final int MAGIC = 0x424C4B42, VERSION = 1;
 
-    static void save(Context ctx, World w, Player p, InputState in) {
-        File tmp = new File(ctx.getFilesDir(), "world.tmp");
-        File dst = new File(ctx.getFilesDir(), "world.dat");
+    static void save(File dst, World w, Player p, InputState in) {
+        File tmp = new File(dst.getPath() + ".tmp");
         try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(
                 new GZIPOutputStream(new FileOutputStream(tmp))))) {
             out.writeInt(MAGIC);
@@ -48,8 +46,7 @@ final class SaveManager {
         }
     }
 
-    static boolean load(Context ctx, World w, Player p, InputState in) {
-        File f = new File(ctx.getFilesDir(), "world.dat");
+    static boolean load(File f, World w, Player p, InputState in) {
         if (!f.exists()) return false;
         try (DataInputStream din = new DataInputStream(new BufferedInputStream(
                 new GZIPInputStream(new FileInputStream(f))))) {
