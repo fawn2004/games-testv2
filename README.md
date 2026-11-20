@@ -2,6 +2,8 @@
 
 A small voxel building sandbox for Android, written in plain Java with OpenGL ES 2.0 (no libraries).
 
+![Block Builder](docs/screenshot-ground.jpg)
+
 **Download:** [`apk/BlockBuilder.apk`](apk/BlockBuilder.apk). Open it on an Android 5.0+ phone and allow
 "install unknown apps" when asked.
 
@@ -18,7 +20,10 @@ A small voxel building sandbox for Android, written in plain Java with OpenGL ES
 - Stairs and slabs face the way you look and go upside-down / on top when you tap the upper half of a
   block; doors and trapdoors open and close when tapped in Build mode; two slabs merge into planks
 - Worlds generate ores underground, gravel and clay lake beds, and four kinds of trees
-- Ambient-occlusion lighting, distance fog, translucent water and an underwater tint
+- Realistic lighting: warm directional sunlight with cast shadows (soft through leaves), cool sky
+  light, ambient occlusion, filmic tone mapping, a gradient sky with a sun, and atmospheric haze
+- Water with animated ripples, sky reflections (Fresnel) and sun glints; murky underwater view
+- Mipmapped textures (no shimmering in the distance) and natural colour variation in plants
 - Walking with auto-jump, swimming, and a fly mode
 - Worlds are saved automatically when you go back to the menu or leave the app
 

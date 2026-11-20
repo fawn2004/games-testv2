@@ -85,6 +85,7 @@ final class SaveManager {
             System.arraycopy(ids, 0, w.blocks, 0, n);
             System.arraycopy(meta, 0, w.meta, 0, n);
             w.seed = seed;
+            w.recomputeMaxHeight();
             w.markAllDirty();
             p.x = x; p.y = y; p.z = z; p.yaw = yaw; p.pitch = pitch;
             in.flying = flying;

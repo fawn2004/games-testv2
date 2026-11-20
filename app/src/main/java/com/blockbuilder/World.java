@@ -14,6 +14,12 @@ final class World {
     /** Orientation / open state of shaped blocks (see Shapes). */
     final byte[] meta = new byte[SX * SY * SZ];
     final boolean[] chunkDirty = new boolean[CX * CZ];
+    /** Highest y that has ever held a non-air block (shadow rays stop above it). */
+    int maxHeight = SY - 1;
+    /** Direction toward the sun, per block climbed (x and z drift per +1 y). */
+    static final float SUN_DX = 0.55f, SUN_DZ = 0.3f;
+    /** Longest shadow, in blocks of height. */
+    static final int SHADOW_STEPS = 32;
     long seed;
 
     static int idx(int x, int y, int z) {
@@ -52,12 +58,51 @@ final class World {
         int i = idx(x, y, z);
         blocks[i] = (char) b;
         meta[i] = (byte) m;
-        // Mark this chunk and any neighbour whose mesh / AO could be affected.
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
-                int cx = (x + dx) / CS, cz = (z + dz) / CS;
-                if (x + dx < 0 || z + dz < 0 || cx >= CX || cz >= CZ) continue;
+        if (b != Blocks.AIR && y > maxHeight) maxHeight = y;
+        // Mark chunks whose mesh, ambient occlusion or shadows could change: the
+        // neighbours, plus everything this block can cast a shadow onto (away from the sun).
+        int reach = Math.min(y, SHADOW_STEPS);
+        int xMin = (int) Math.floor(x - reach * SUN_DX) - 1, zMin = (int) Math.floor(z - reach * SUN_DZ) - 1;
+        for (int cx = Math.max(0, xMin) / CS; cx <= Math.min(SX - 1, x + 1) / CS; cx++)
+            for (int cz = Math.max(0, zMin) / CS; cz <= Math.min(SZ - 1, z + 1) / CS; cz++)
                 chunkDirty[cx * CZ + cz] = true;
+    }
+
+    /** How much light passes through a block (1 = clear, 0 = blocks it). */
+    static float transmit(int b) {
+        if (b == Blocks.AIR) return 1f;
+        if (Blocks.isOpaque(b)) return 0f;
+        if (b == Blocks.LEAVES || b == Blocks.AUTUMN_LEAVES || b == Blocks.BLOSSOM_LEAVES) return 0.55f;
+        if (b == Blocks.WATER) return 0.8f;
+        if (b == Blocks.GLASS) return 0.92f;
+        int shape = Blocks.shape(b);
+        if (shape == Shapes.SLAB || shape == Shapes.STAIRS) return 0.35f;
+        return 0.6f; // doors, trapdoors
+    }
+
+    /** Fraction of direct sunlight reaching the centre of a cell (soft shadows from leaves). */
+    float sunlight(int x, int y, int z) {
+        float t = 1f;
+        float fx = x + 0.5f, fz = z + 0.5f;
+        for (int k = 1; k <= SHADOW_STEPS; k++) {
+            int py = y + k;
+            if (py > maxHeight) return t;
+            fx += SUN_DX;
+            fz += SUN_DZ;
+            int px = (int) Math.floor(fx), pz = (int) Math.floor(fz);
+            if (px < 0 || pz < 0 || px >= SX || pz >= SZ) return t;
+            t *= transmit(blocks[idx(px, py, pz)]);
+            if (t < 0.03f) return 0f;
+        }
+        return t;
+    }
+
+    void recomputeMaxHeight() {
+        maxHeight = 0;
+        for (int i = 0; i < blocks.length; i++) {
+            if (blocks[i] != Blocks.AIR) {
+                int y = i % SY;
+                if (y > maxHeight) maxHeight = y;
             }
         }
     }
@@ -85,6 +130,7 @@ final class World {
                                 : y < FLAT_TOP ? Blocks.DIRT : Blocks.GRASS;
                         blocks[idx(x, y, z)] = (char) b;
                     }
+            maxHeight = FLAT_TOP;
             markAllDirty();
             return;
         }
@@ -138,6 +184,7 @@ final class World {
                 else growTree(x, h + 1, z, rnd, Blocks.DARK_LOG, Blocks.BLOSSOM_LEAVES, 0);
             }
         }
+        recomputeMaxHeight();
         markAllDirty();
     }
 

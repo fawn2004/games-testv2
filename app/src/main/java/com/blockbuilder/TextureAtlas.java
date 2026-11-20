@@ -18,22 +18,54 @@ final class TextureAtlas {
     }
 
     static int upload() {
-        int[] px = pixels();
-        ByteBuffer buf = ByteBuffer.allocateDirect(SIZE * SIZE * 4).order(ByteOrder.nativeOrder());
-        for (int p : px) {
-            buf.put((byte) (p >> 16)).put((byte) (p >> 8)).put((byte) p).put((byte) (p >>> 24));
-        }
-        buf.position(0);
+        int[] level = pixels();
+        int size = SIZE;
         int[] ids = new int[1];
         GLES20.glGenTextures(1, ids, 0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0]);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST);
+        // Crisp pixels up close, smoothly filtered mipmaps in the distance (no shimmering).
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST_MIPMAP_LINEAR);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, SIZE, SIZE, 0,
-                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+        for (int lvl = 0; size >= 1; lvl++) {
+            ByteBuffer buf = ByteBuffer.allocateDirect(size * size * 4).order(ByteOrder.nativeOrder());
+            for (int p : level) buf.put((byte) (p >> 16)).put((byte) (p >> 8)).put((byte) p).put((byte) (p >>> 24));
+            buf.position(0);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, lvl, GLES20.GL_RGBA, size, size, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+            if (size == 1) break;
+            level = downsample(level, size);
+            size /= 2;
+        }
         return ids[0];
+    }
+
+    /**
+     * Halves an atlas level with a 2x2 box filter. Tiles are powers of two wide, so
+     * every 2x2 block stays inside one tile until tiles are a single pixel; colour is
+     * alpha-weighted so transparent pixels don't darken edges.
+     */
+    static int[] downsample(int[] src, int size) {
+        int half = size / 2;
+        int[] dst = new int[half * half];
+        for (int y = 0; y < half; y++)
+            for (int x = 0; x < half; x++) {
+                int a = 0, r = 0, g = 0, b = 0, maxA = 0;
+                for (int k = 0; k < 4; k++) {
+                    int p = src[(y * 2 + (k >> 1)) * size + x * 2 + (k & 1)];
+                    int pa = p >>> 24;
+                    a += pa;
+                    maxA = Math.max(maxA, pa);
+                    r += ((p >> 16) & 255) * pa; g += ((p >> 8) & 255) * pa; b += (p & 255) * pa;
+                }
+                int outA = a / 4;
+                // Keep cut-out textures (leaves) from thinning out in the distance.
+                if (maxA == 255 && outA >= 96) outA = Math.min(255, outA + 48);
+                if (a > 0) { r /= a; g /= a; b /= a; }
+                dst[y * half + x] = (outA << 24) | (r << 16) | (g << 8) | b;
+            }
+        return dst;
     }
 
     // ---------------------------------------------------------------- painting
@@ -157,7 +189,9 @@ final class TextureAtlas {
     private static void leaves(int tile, int color, float holes, int dots) {
         for (int y = 0; y < TILE; y++)
             for (int x = 0; x < TILE; x++) {
-                int c = argb(shade(color, vary(0.25f)));
+                // Clumps of lighter and darker leaves rather than per-pixel noise.
+                float clump = 0.88f + 0.16f * (float) Math.sin(x * 1.3f + Math.sin(y * 0.9f) * 2f);
+                int c = argb(shade(color, clump * vary(0.12f)));
                 set(tile, x, y, r.nextFloat() < holes ? 0 : c);
             }
         if (dots != 0) {
@@ -191,17 +225,15 @@ final class TextureAtlas {
             }
     }
 
+    /** Matte, concrete-like coloured block: fine grain, a few pores and soft worn edges. */
     private static void colorBlock(int tile, int base, boolean darkEdge) {
         for (int y = 0; y < TILE; y++)
             for (int x = 0; x < TILE; x++) {
-                float f = vary(0.03f);
-                if (x == 0 || y == 0) f *= 1.18f;
-                else if (x == 15 || y == 15) f *= 0.75f;
-                else if (x == 1 || y == 1) f *= 1.07f;
-                else if (x == 14 || y == 14) f *= 0.88f;
-                int b = base;
-                if (darkEdge && (x == 0 || y == 0)) b = 0x55555C;
-                set(tile, x, y, argb(shade(b, f)));
+                float f = 0.96f + r.nextFloat() * 0.06f;
+                f *= 1f + 0.025f * (float) Math.sin(x * 0.7f + y * 0.45f);
+                if (x == 0 || y == 0 || x == 15 || y == 15) f *= 0.9f;
+                if (r.nextFloat() < 0.025f) f *= 0.82f;
+                set(tile, x, y, argb(shade(base, f)));
             }
     }
 
@@ -495,14 +527,14 @@ final class TextureAtlas {
         r = new Random(1337);
 
         // ---------------- original tiles
-        noisy(Blocks.T_GRASS_TOP, 0x5FA13A, 0.14f);
+        noisy(Blocks.T_GRASS_TOP, 0x5A9236, 0.12f);
         noisy(Blocks.T_DIRT, 0x866043, 0.14f);
         for (int i = 0; i < 18; i++)
             set(Blocks.T_DIRT, r.nextInt(16), r.nextInt(16), argb(shade(0x866043, 0.7f)));
         for (int x = 0; x < TILE; x++) {
             int depth = 3 + r.nextInt(2) + (r.nextInt(5) == 0 ? 2 : 0);
             for (int y = 0; y < TILE; y++) {
-                int c = y < depth ? shade(0x5A9A36, vary(0.12f)) : shade(0x866043, vary(0.14f));
+                int c = y < depth ? shade(0x558C33, vary(0.12f)) : shade(0x866043, vary(0.14f));
                 set(Blocks.T_GRASS_SIDE, x, y, argb(c));
             }
         }
@@ -516,7 +548,7 @@ final class TextureAtlas {
         planks(Blocks.T_PLANKS, 0xB08A55);
         logSide(Blocks.T_LOG_SIDE, 0x6B4F2F, false);
         logTop(Blocks.T_LOG_TOP, 0x6B4F2F, 0xBC9862, 0xA07E4C);
-        leaves(Blocks.T_LEAVES, 0x3B8A2A, 0.16f, 0);
+        leaves(Blocks.T_LEAVES, 0x2F7024, 0.16f, 0);
         noisy(Blocks.T_SAND, 0xDBCF8E, 0.07f);
         for (int y = 0; y < TILE; y++)
             for (int x = 0; x < TILE; x++) {

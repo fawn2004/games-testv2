@@ -1,8 +1,9 @@
 package com.blockbuilder;
 
-/** Growable float array used while building meshes. */
+/** Growable float array used while building meshes (8 floats per vertex). */
 final class FloatBuilder {
-    float[] data = new float[1 << 14];
+    static final int STRIDE = 8;
+    float[] data = new float[1 << 15];
     int size;
 
     void clear() {
@@ -17,10 +18,11 @@ final class FloatBuilder {
         }
     }
 
-    void vertex(float x, float y, float z, float u, float v, float light) {
+    void vertex(float x, float y, float z, float u, float v, float r, float g, float b) {
         float[] d = data;
         int s = size;
-        d[s] = x; d[s + 1] = y; d[s + 2] = z; d[s + 3] = u; d[s + 4] = v; d[s + 5] = light;
-        size = s + 6;
+        d[s] = x; d[s + 1] = y; d[s + 2] = z; d[s + 3] = u; d[s + 4] = v;
+        d[s + 5] = r; d[s + 6] = g; d[s + 7] = b;
+        size = s + 8;
     }
 }
